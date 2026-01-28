@@ -1,16 +1,23 @@
+# debug_widget.py
 import streamlit as st
-from interfaces.streamlit_components import widgets
+import uuid
 
-st.title("Widget Key Debugger")
+# Global store to track all widget keys used in the session
+if "widget_keys_used" not in st.session_state:
+    st.session_state["widget_keys_used"] = set()
 
-# Call all widgets so their keys are registered
-widgets.create_model_selector()
-widgets.create_strategy_selector()
-widgets.create_threshold_sliders()
-widgets.create_parameter_slider("surveillance_level", "Surveillance Intensity", "Set intensity")
-widgets.create_parameter_preset_selector()
-widgets.create_export_buttons(result={})
-widgets.create_color_theme_selector()
 
-# Report duplicates
-widgets.report_duplicate_keys()
+def get_unique_key(base_key: str) -> str:
+    """Generate a truly unique key for Streamlit widgets."""
+    unique_key = f"{base_key}_{uuid.uuid4().hex[:8]}"
+
+    # Check duplicates
+    if unique_key in st.session_state["widget_keys_used"]:
+        st.warning(f"[DUPLICATE DETECTED] {unique_key}")
+    st.session_state["widget_keys_used"].add(unique_key)
+
+    return unique_key
+def show_used_keys():
+    st.sidebar.markdown("### 🔑 Widget Keys Used")
+    for key in st.session_state.get("widget_keys_used", []):
+        st.sidebar.write(key)

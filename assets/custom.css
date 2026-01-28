@@ -1,0 +1,64 @@
+/* Global Theme Styles */
+:root {
+  --primary-color: #1E88E5;
+  --success-color: #4CAF50;
+  --warning-color: #FFC107;
+  --danger-color: #F44336;
+  --dark-color: #2D3748;
+  --light-color: #F7FAFC;
+}
+
+.main {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Section Headers */
+.section-header {
+  padding: 15px 0 10px 0;
+  margin: 20px 0 15px 0;
+  border-bottom: 2px solid #e0e0e0;
+  color: #333;
+  font-weight: 700;
+  font-size: 1.5rem;
+}
+
+/* Card Styling */
+.metric-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  border-left: 5px solid var(--primary-color);
+  margin: 10px 0;
+  transition: all 0.3s ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+}
+
+/* Button Styling */
+.stButton > button {
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: none;
+}
+
+.stButton > button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 20px rgba(0,0,0,0.2);
+}
+
+/* Security Theme */
+.security-card {
+  border-left-color: #1E88E5;
+}
+
+/* Healthcare Theme */
+.healthcare-card {
+  border-left-color: #1976D2;
+}

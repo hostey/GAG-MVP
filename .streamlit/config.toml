@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#bb5a38"  # Professional accent
+backgroundColor = "#f0f2f6"
+secondaryBackgroundColor = "#e0e0e0"
+textColor = "#262730"
+font = "sans serif"
