@@ -1,266 +1,463 @@
-# pages/02_Healthcare_Equity.py
+# pages/1_🏥_Healthcare_Equity.py
 import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
 import numpy as np
-from datetime import datetime
-import warnings
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-warnings.filterwarnings('ignore')
+from components.governance_logic import run_simple_simulation
+from utils.config import simulation_config, settings
 
-from utils.simulation_healthcare import HealthcareSimulator, HealthcareResult
-
-# Page configuration
+# ───────────────────────────────────────────────
+# Page Configuration
+# ───────────────────────────────────────────────
 st.set_page_config(
-    page_title="Healthcare Equity",
-    page_icon="⚕️",
-    layout="wide"
+    page_title="Healthcare Equity • GAGS",
+    layout="wide",
+    page_icon=""
 )
 
-# Inject custom CSS
-with open("assets/custom.css") as f:
-    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-# Healthcare Dashboard Header
+# Custom CSS for styling
 st.markdown("""
-    <div style="text-align: center; padding: 30px; background: linear-gradient(135deg, #1976D2 0%, #0D47A1 100%); 
-            border-radius: 15px; color: white; margin-bottom: 30px;">
-        <h1 style="margin:0; font-size: 2.5rem; font-weight: 800;">⚕️ Healthcare Equity Module</h1>
-        <p style="margin:10px 0 0 0; opacity: 0.9; font-size: 1.1rem;">
-            AI Triage Fairness Analysis for Rural & Underserved Communities
-        </p>
-    </div>
+<style>
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        color: white;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 4px solid #667eea;
+        margin-bottom: 1rem;
+    }
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .warning-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .bias-tag {
+        display: inline-block;
+        background: #ff6b6b;
+        color: white;
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        margin: 0.2rem;
+    }
+    .stButton>button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 0.75rem 2rem;
+        font-weight: bold;
+        border-radius: 8px;
+        transition: all 0.3s;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+</style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'healthcare_history' not in st.session_state:
-    st.session_state.healthcare_history = []
+# ───────────────────────────────────────────────
+# Header Section
+# ───────────────────────────────────────────────
+st.markdown("""
+<div class="main-header">
+    <h1 style="margin:0; color:white;"> Healthcare Equity Simulation</h1>
+    <p style="margin:0; opacity:0.9; font-size:1.1rem;">
+        Explore how different types of bias and data poisoning affect AI fairness and accuracy in healthcare
+    </p>
+</div>
+""", unsafe_allow_html=True)
 
-# Sidebar controls
+# ───────────────────────────────────────────────
+# Sidebar – Simulation Controls
+# ───────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚕️ Simulation Parameters")
+    # Logo/Title
+    st.markdown("""
+    <div style="text-align:center; padding:1rem 0;">
+        <h2 style="color:#667eea; margin:0;"> Simulation Controls</h2>
+        <p style="color:#666; font-size:0.9rem;">Configure your simulation parameters</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with st.expander("Population Settings", expanded=True):
-        n_patients = st.number_input(
-            "Patient Count",
-            100, 10000, 1000, 100
+    st.divider()
+
+    # Bias Configuration
+    st.subheader(" Bias Configuration")
+
+    selected_biases = st.multiselect(
+        "**Bias Types to Inject**",
+        options=simulation_config.BIAS_TYPES,
+        default=["demographic", "historical", "selection"],
+        help="Select which bias mechanisms to simulate in your model",
+        placeholder="Choose bias types..."
+    )
+
+    # Display selected biases as tags
+    if selected_biases:
+        tags_html = "".join([f'<span class="bias-tag">{bias}</span>' for bias in selected_biases])
+        st.markdown(f"**Selected biases:**<br>{tags_html}", unsafe_allow_html=True)
+
+    bias_intensity = st.slider(
+        "**Bias Intensity**",
+        min_value=0.0,
+        max_value=simulation_config.MAX_BIAS_FACTOR,
+        value=0.30,
+        step=0.05,
+        format="%.2f",
+        help="Higher values indicate stronger bias injection"
+    )
+
+    # Visual indicator for bias intensity
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.caption("Low")
+    with col2:
+        st.progress(bias_intensity / simulation_config.MAX_BIAS_FACTOR)
+    with col3:
+        st.caption("High")
+
+    st.divider()
+
+    # Attack Configuration
+    st.subheader("Attack Configuration")
+
+    poison_rate = st.slider(
+        "**Data Poisoning Rate**",
+        min_value=simulation_config.ATTACK_TYPES["data_poisoning"]["min_rate"],
+        max_value=simulation_config.ATTACK_TYPES["data_poisoning"]["max_rate"],
+        value=simulation_config.ATTACK_TYPES["data_poisoning"]["default"],
+        step=0.01,
+        format="%.1f%%",
+        help="Percentage of training data to poison"
+    )
+
+    # Data Configuration
+    st.subheader(" Data Configuration")
+
+    sample_size = st.slider(
+        "**Sample Size**",
+        min_value=1000,
+        max_value=settings.DEFAULT_N_SAMPLES * 2,
+        value=settings.DEFAULT_N_SAMPLES,
+        step=1000,
+        help="Number of data samples for simulation"
+    )
+
+    st.divider()
+
+    # Run Button
+    run_button = st.button(
+        " **RUN SIMULATION**",
+        type="primary",
+        use_container_width=True,
+        help="Click to execute simulation with current parameters"
+    )
+
+# ───────────────────────────────────────────────
+# Main Content Area
+# ───────────────────────────────────────────────
+if run_button:
+    with st.spinner("️ Running simulation... This may take a moment."):
+        # Run simulation
+        result = run_simple_simulation(
+            bias_types=selected_biases,
+            bias_factor=bias_intensity,
+            poison_rate=poison_rate,
+            n_samples=sample_size,
+            n_features=10
         )
-        rural_percentage = st.slider(
-            "Rural Population %",
-            10, 50, 30, 5
-        )
-        bias_factor = st.slider(
-            "Bias Factor",
-            0.0, 1.0, 0.3, 0.1
-        )
 
-    with st.expander("Model Settings", expanded=False):
-        hidden_layers = st.multiselect(
-            "Model Architecture",
-            [4, 8, 16, 32],
-            default=[16, 8]
-        )
-        epochs = st.slider("Training Epochs", 50, 500, 100, 50)
+    # ── Performance Metrics Section ───────────────────────────────
+    st.markdown("###  Performance Dashboard")
 
-    with st.expander("Mitigation", expanded=True):
-        mitigation_enabled = st.checkbox("Enable Bias Mitigation", value=True)
-        if mitigation_enabled:
-            mitigation_strength = st.slider("Mitigation Strength", 0.0, 1.0, 0.5, 0.1)
-
-
-# Simulation Engine
-@st.cache_resource
-def get_healthcare_simulator():
-    return HealthcareSimulator()
-
-
-simulator = get_healthcare_simulator()
-
-# Simulation Controls
-st.markdown('<div class="section-header">🎮 Simulation Controls</div>', unsafe_allow_html=True)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("▶️ Run Healthcare Simulation", type="primary", use_container_width=True):
-        with st.spinner("Running healthcare simulation..."):
-            # Run simulation
-            result = simulator.run_simulation(
-                n_patients=n_patients,
-                bias_factor=bias_factor,
-                model_config={'hidden_dims': hidden_layers},
-                training_config={'epochs': epochs}
-            )
-
-            # Store in session state
-            st.session_state.current_healthcare_result = result
-
-            # Add to history
-            st.session_state.healthcare_history.append({
-                'timestamp': datetime.now(),
-                'accuracy': result.accuracy,
-                'equity': result.fairness_metrics.get('fairness_score', 100),
-                'rural_gap': result.bias_metrics.get('rural_urban_disparity', 0)
-            })
-
-            st.success("✅ Healthcare simulation completed!")
-
-with col2:
-    if st.button("⚖️ Apply Mitigation", type="secondary", use_container_width=True):
-        if 'current_healthcare_result' in st.session_state:
-            st.info("Mitigation techniques applied successfully!")
-        else:
-            st.warning("Please run simulation first!")
-
-with col3:
-    if st.button("🔄 Reset", type="secondary", use_container_width=True):
-        st.session_state.healthcare_history = []
-        if 'current_healthcare_result' in st.session_state:
-            del st.session_state.current_healthcare_result
-        st.rerun()
-
-# Display results if available
-if 'current_healthcare_result' in st.session_state:
-    result = st.session_state.current_healthcare_result
-
-    # Metrics Cards
-    st.markdown('<div class="section-header">📊 Healthcare Metrics</div>', unsafe_allow_html=True)
-
+    # Main Metrics Cards
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.markdown(f"""
-            <div class="metric-card healthcare-card">
-                <div style="font-size: 0.9rem; color: #666; margin-bottom: 8px;">Diagnostic Accuracy</div>
-                <div style="font-size: 2.2rem; font-weight: 700; color: #333; margin: 10px 0;">
-                    {result.accuracy:.1f}%
-                </div>
-                <div style="font-size: 0.85rem; color: #777;">Correct triage decisions</div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Model Accuracy",
+            value=f"{result['accuracy']:.2%}",
+            delta=f"{(result['accuracy'] - simulation_config.ACCURACY_TARGET):+.1%}" if result['accuracy'] else None,
+            delta_color="inverse" if result['accuracy'] < simulation_config.ACCURACY_TARGET else "normal",
+            help="Overall model prediction accuracy"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with col2:
-        equity_score = result.fairness_metrics.get('fairness_score', 100)
-        st.markdown(f"""
-            <div class="metric-card healthcare-card">
-                <div style="font-size: 0.9rem; color: #666; margin-bottom: 8px;">Equity Score</div>
-                <div style="font-size: 2.2rem; font-weight: 700; color: #333; margin: 10px 0;">
-                    {equity_score:.1f}
-                </div>
-                <div style="font-size: 0.85rem; color: #777;">Fairness across demographics</div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Fairness Score",
+            value=f"{result['fairness_score']:.3f}",
+            delta=f"{(result['fairness_score'] - simulation_config.FAIRNESS_TARGET):+.3f}" if result[
+                'fairness_score'] else None,
+            delta_color="inverse" if result['fairness_score'] < simulation_config.FAIRNESS_TARGET else "normal",
+            help="1.0 = perfect fairness between demographic groups"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with col3:
-        rural_disparity = result.bias_metrics.get('rural_urban_disparity', 0)
-        st.markdown(f"""
-            <div class="metric-card healthcare-card">
-                <div style="font-size: 0.9rem; color: #666; margin-bottom: 8px;">Rural-Urban Gap</div>
-                <div style="font-size: 2.2rem; font-weight: 700; color: #333; margin: 10px 0;">
-                    {rural_disparity:.1f}%
-                </div>
-                <div style="font-size: 0.85rem; color: #777;">Location-based disparity</div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Data Integrity",
+            value=f"{100 - (result['poisoned_samples'] / result['sample_size_after_bias'] * 100):.1f}%",
+            delta=None,
+            help="Percentage of clean data after poisoning"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with col4:
-        ses_disparity = result.bias_metrics.get('ses_disparity', 0)
-        st.markdown(f"""
-            <div class="metric-card healthcare-card">
-                <div style="font-size: 0.9rem; color: #666; margin-bottom: 8px;">SES Disparity</div>
-                <div style="font-size: 2.2rem; font-weight: 700; color: #333; margin: 10px 0;">
-                    {ses_disparity:.1f}%
-                </div>
-                <div style="font-size: 0.85rem; color: #777;">Socioeconomic fairness gap</div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Effective Samples",
+            value=f"{result['sample_size_after_bias']:,}",
+            delta=f"{result['sample_size_after_bias'] - sample_size:+,}" if result['sample_size_after_bias'] else None,
+            help="Final dataset size after bias application"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # Visualizations
-    st.markdown('<div class="section-header">📈 Fairness Analysis</div>', unsafe_allow_html=True)
+    # ── Detailed Analysis Section ───────────────────────────────
+    st.divider()
+    st.markdown("###  Detailed Analysis")
 
-    tab1, tab2, tab3 = st.tabs(["Demographic Accuracy", "Disparity Metrics", "Recommendations"])
+    tab1, tab2, tab3 = st.tabs(["Performance Gauges", " Impact Analysis", " Simulation Details"])
 
     with tab1:
-        # Group accuracy comparison
-        categories = ['Rural', 'Urban', 'Low SES', 'High SES']
-        rural_acc = result.bias_metrics.get('rural_accuracy', 0)
-        urban_acc = result.bias_metrics.get('urban_accuracy', 0)
-        low_ses_acc = result.bias_metrics.get('low_ses_accuracy', 0)
-        high_ses_acc = result.bias_metrics.get('high_ses_accuracy', 0)
+        # Create dual gauge chart
+        fig = make_subplots(
+            rows=1, cols=2,
+            specs=[[{'type': 'indicator'}, {'type': 'indicator'}]],
+            subplot_titles=("Accuracy Gauge", "Fairness Gauge")
+        )
 
-        fig = go.Figure(data=[
-            go.Bar(
-                x=categories,
-                y=[rural_acc, urban_acc, low_ses_acc, high_ses_acc],
-                marker_color=['#2196F3', '#64B5F6', '#FF9800', '#FFB74D']
-            )
-        ])
+        # Accuracy Gauge
+        fig.add_trace(go.Indicator(
+            mode="gauge+number+delta",
+            value=result['accuracy'] * 100,
+            title={'text': "Accuracy", 'font': {'size': 20}},
+            delta={'reference': simulation_config.ACCURACY_TARGET * 100},
+            gauge={
+                'axis': {'range': [0, 100]},
+                'bar': {'color': "royalblue"},
+                'steps': [
+                    {'range': [0, 70], 'color': "lightgray"},
+                    {'range': [70, 85], 'color': "gray"},
+                    {'range': [85, 100], 'color': "darkgray"}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': simulation_config.ACCURACY_TARGET * 100
+                }
+            }
+        ), row=1, col=1)
+
+        # Fairness Gauge
+        fig.add_trace(go.Indicator(
+            mode="gauge+number+delta",
+            value=result['fairness_score'] * 100,
+            title={'text': "Fairness", 'font': {'size': 20}},
+            delta={'reference': simulation_config.FAIRNESS_TARGET * 100},
+            gauge={
+                'axis': {'range': [0, 100]},
+                'bar': {'color': "darkgreen"},
+                'steps': [
+                    {'range': [0, 70], 'color': "lightgray"},
+                    {'range': [70, 85], 'color': "gray"},
+                    {'range': [85, 100], 'color': "darkgray"}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': simulation_config.FAIRNESS_TARGET * 100
+                }
+            }
+        ), row=1, col=2)
 
         fig.update_layout(
-            title="Accuracy by Demographic Group",
-            yaxis_title="Accuracy (%)",
-            yaxis_range=[0, 100],
-            height=400
+            height=300,
+            margin=dict(l=20, r=20, t=50, b=20),
+            template="plotly_white"
         )
 
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        # Disparity metrics
-        disparity_data = pd.DataFrame({
-            'Metric': ['Rural-Urban', 'SES', 'Age', 'Equal Opp'],
-            'Value': [
-                rural_disparity,
-                ses_disparity,
-                result.bias_metrics.get('age_disparity', 0),
-                result.fairness_metrics.get('equal_opportunity', 0) * 100
-            ]
-        })
+        col1, col2 = st.columns(2)
 
-        fig = px.bar(
-            disparity_data,
-            x='Metric',
-            y='Value',
-            color='Value',
-            color_continuous_scale=['#4CAF50', '#FFC107', '#F44336'],
-            range_color=[0, 20],
-            labels={'Value': 'Disparity (%)'},
-            height=400
-        )
+        with col1:
+            # Create impact visualization
+            fig = px.bar(
+                x=["Bias Impact", "Poisoning Impact", "Data Quality"],
+                y=[bias_intensity * 100, poison_rate * 100,
+                   (result['sample_size_after_bias'] / sample_size) * 100],
+                title="Impact Factors Comparison",
+                labels={"x": "Factor", "y": "Impact (%)"},
+                color_discrete_sequence=["#FF6B6B", "#4ECDC4", "#45B7D1"]
+            )
+            fig.update_layout(template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True)
 
-        fig.update_layout(title="Fairness Disparity Metrics (Lower is Better)")
-        st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            st.markdown("###  Impact Summary")
+            st.markdown(f"""
+            <div class="{'warning-box' if bias_intensity > 0.5 else 'success-box'}">
+                <strong>Bias Impact:</strong> {' High' if bias_intensity > 0.5 else ' Moderate'} bias injection
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown(f"""
+            <div class="{'warning-box' if poison_rate > 0.1 else 'success-box'}">
+                <strong>Poisoning Impact:</strong> {' Critical' if poison_rate > 0.1 else ' Controlled'} poisoning level
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown(f"""
+            <div class="{'warning-box' if result['accuracy'] < simulation_config.ACCURACY_TARGET else 'success-box'}">
+                <strong>Accuracy Status:</strong> {' Below target' if result['accuracy'] < simulation_config.ACCURACY_TARGET else ' Above target'}
+            </div>
+            """, unsafe_allow_html=True)
 
     with tab3:
-        # Recommendations
-        st.markdown("### 🎯 Recommendations")
+        # Simulation details in expandable sections
+        with st.expander(" Simulation Configuration", expanded=True):
+            config_col1, config_col2 = st.columns(2)
+            with config_col1:
+                st.write("**Bias Types Applied:**")
+                for bias in result.get('applied_biases', selected_biases):
+                    st.code(bias)
+            with config_col2:
+                st.write("**Parameters:**")
+                st.write(f"- Bias Intensity: {bias_intensity}")
+                st.write(f"- Poison Rate: {poison_rate:.1%}")
+                st.write(f"- Initial Samples: {sample_size:,}")
 
-        recommendations = []
+        with st.expander(" Detailed Metrics", expanded=False):
+            metrics_col1, metrics_col2 = st.columns(2)
+            with metrics_col1:
+                st.write("**Performance Metrics:**")
+                st.write(f"- Accuracy: {result['accuracy']:.2%}")
+                st.write(f"- Fairness Score: {result['fairness_score']:.3f}")
+                st.write(f"- Poisoned Samples: {result['poisoned_samples']:,}")
+            with metrics_col2:
+                st.write("**Target Comparison:**")
+                st.write(f"- Target Accuracy: {simulation_config.ACCURACY_TARGET:.0%}")
+                st.write(f"- Target Fairness: {simulation_config.FAIRNESS_TARGET:.2f}")
+                st.write(f"- Bias Types Applied: {result.get('applied_biases', len(selected_biases))}")
 
-        if equity_score < 70:
-            recommendations.append("**Implement fairness-aware training techniques**")
+    # ── Recommendations Section ───────────────────────────────
+    st.divider()
+    st.markdown("###  Recommendations")
 
-        if rural_disparity > 10:
-            recommendations.append("**Collect more balanced data from rural areas**")
+    if result['accuracy'] < simulation_config.ACCURACY_TARGET or result[
+        'fairness_score'] < simulation_config.FAIRNESS_TARGET:
+        st.warning("""
+        ** Model Performance Alert:**
 
-        if ses_disparity > 10:
-            recommendations.append("**Apply differential privacy for SES variables**")
+        Your simulation shows degraded performance. Consider:
+        1. **Reduce bias intensity** to improve fairness
+        2. **Implement data validation** to detect poisoning
+        3. **Use fairness-aware algorithms** for better equity
+        4. **Increase dataset diversity** to reduce bias impact
+        """)
+    else:
+        st.success("""
+        ** Good Performance Achieved:**
 
-        if result.accuracy < 75:
-            recommendations.append("**Improve model architecture and training data quality**")
+        Your model meets target objectives. To maintain performance:
+        1. **Continue monitoring** bias and fairness metrics
+        2. **Regularly audit** data quality
+        3. **Implement continuous validation** pipelines
+        4. **Document all bias mitigation strategies**
+        """)
 
-        if recommendations:
-            for rec in recommendations:
-                st.warning(f"• {rec}")
-        else:
-            st.success("✅ Current system shows good fairness and performance!")
+    st.caption("*Note: This is a simulation. Real-world models require additional validation and ethical review.*")
+
+else:
+    # Welcome State
+    st.markdown("""
+    ##  Welcome to Healthcare Equity Simulation
+
+    This tool helps you understand how bias and data poisoning affect AI models in healthcare settings.
+
+    ###  What You Can Explore:
+
+    """)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("""
+        <div style="text-align:center; padding:1rem; background:#f8f9fa; border-radius:10px;">
+            <h3> Bias Types</h3>
+            <p>Simulate demographic, historical, and selection biases</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("""
+        <div style="text-align:center; padding:1rem; background:#f8f9fa; border-radius:10px;">
+            <h3> Data Attacks</h3>
+            <p>Test resilience against data poisoning attacks</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+        <div style="text-align:center; padding:1rem; background:#f8f9fa; border-radius:10px;">
+            <h3> Performance</h3>
+            <p>Monitor accuracy and fairness metrics</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # Quick Start Guide
+    st.markdown("""
+    ###  Quick Start Guide:
+
+    1. **Configure** simulation parameters in the sidebar
+    2. **Select** which bias types to inject
+    3. **Adjust** intensity and poisoning levels
+    4. **Click** "RUN SIMULATION" to see results
+
+    """)
+
+    # Example Scenarios
+    with st.expander(" Try These Example Scenarios"):
+        scenario_col1, scenario_col2 = st.columns(2)
+
+        with scenario_col1:
+            st.write("**High Bias, Low Poisoning**")
+            st.caption("Bias Intensity: 0.8 | Poison Rate: 0.02")
+            st.write("*Tests fairness impact*")
+
+        with scenario_col2:
+            st.write("**Low Bias, High Poisoning**")
+            st.caption("Bias Intensity: 0.1 | Poison Rate: 0.15")
+            st.write("*Tests resilience to attacks*")
+
+    st.info(
+        " **Tip:** Start with moderate settings and gradually increase complexity to understand interactions between different factors.")
 
 # Footer
-st.markdown("---")
-st.markdown("""
-    <div style="text-align: center; color: #666; padding: 20px;">
-        <p>⚕️ Healthcare Equity Module v2.0 | Part of GAGS Resilience Framework</p>
-        <p style="font-size: 0.8rem;">Navigate to Security module for surveillance-liberty trade-off analysis</p>
-    </div>
-""", unsafe_allow_html=True)
+st.divider()
+st.caption("Healthcare Equity Simulation • GAGS Framework • v1.0 • [Learn More](https://example.com)")
