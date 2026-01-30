@@ -61,29 +61,37 @@ class MetricsEvaluator:
     def evaluate(
             self,
             model,
-            X_test: torch.Tensor,
-            y_test: torch.Tensor,
+            X_test: Any,  # Changed from torch.Tensor to Any for safety
+            y_test: Any,
             parameters: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Comprehensive model evaluation."""
 
         start_time = time.time()
 
+        # 1. ENFORCE TENSOR CONVERSION (The Critical Fix)
+        if not torch.is_tensor(X_test):
+            X_test = torch.from_numpy(X_test).float()
+
         # 1. Move data to appropriate device
         X_test = X_test.to(model.device)
         # We keep y_test on CPU for sklearn later
-        y_true = y_test.cpu().numpy().flatten()
+
+        if torch.is_tensor(y_test):
+            y_true = y_test.cpu().numpy().flatten()
+        else:
+            y_true = np.array(y_test).flatten()
 
         # 2. Generate predictions
         with torch.no_grad():
             model.eval()
 
             inference_start = time.time()
-            # Use predict_proba which returns a NumPy array in your BaseModel
+            # Use predict_proba which we ensured returns a NumPy array
             y_pred_proba = model.predict_proba(X_test).flatten()
             inference_end = time.time()
 
-            # 3. Convert to binary predictions (Now safe because it's NumPy)
+            # 3. Convert to binary predictions
             threshold = parameters.get('threshold', 0.5)
             y_pred = (y_pred_proba > threshold).astype(int)
 

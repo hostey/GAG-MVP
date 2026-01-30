@@ -62,6 +62,9 @@ class AppSettings(BaseSettings):
     MIN_LIBERTY_THRESHOLD: int = 0
     MAX_LIBERTY_THRESHOLD: int = 100
 
+    # Governance References
+    ISO_STANDARD: str = "ISO/IEC 42001:2023"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

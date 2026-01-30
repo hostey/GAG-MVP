@@ -25,14 +25,13 @@ class AdvancedDataGenerator:
 
         # 4. Convert to Tensors
         # BCELoss requires FloatTensor for both X and y
+        # 4. Convert to Tensors and ENSURE 2D for labels
         X_tensor = torch.from_numpy(X)
-        y_tensor = torch.from_numpy(y)
+        y_tensor = torch.from_numpy(y).view(-1, 1)  # Add this to match model output
 
         # 5. Split data
         train_idx = int(n_samples * split_ratios[0])
         val_idx = train_idx + int(n_samples * split_ratios[1])
 
-        return (
-            X_tensor[:train_idx], X_tensor[train_idx:val_idx], X_tensor[val_idx:],
+        return X_tensor[:train_idx], X_tensor[train_idx:val_idx], X_tensor[val_idx:], \
             y_tensor[:train_idx], y_tensor[train_idx:val_idx], y_tensor[val_idx:]
-        )

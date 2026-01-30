@@ -1,40 +1,32 @@
-# 🛡️ GAGS Resilience Framework
+# Global AI Governance Sandbox (GAGS) Resilience Framework
 
-**Global AI Governance Sandbox - Enterprise Edition**
-
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-FF4B4B.svg)](https://streamlit.io)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C.svg)](https://pytorch.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://your-deployed-app-url.streamlit.app)  <!-- Update with your deployment URL -->
 
-## 🚀 Overview
+An interactive simulation tool for exploring AI governance challenges in high-stakes sectors, inspired by ISO/IEC 42001:2023. Simulate bias, attacks, and resilience in:
+- **Healthcare Equity**
+- **National Security Resilience**
+- **Sustainable Agrotech**
 
-The **GAGS Resilience Framework** is a comprehensive simulation platform for analyzing AI governance trade-offs in security and healthcare domains. This enterprise-grade system provides:
+## Features
+- Configurable simulations with Pydantic validation.
+- Streamlit UI for interactive what-if scenarios.
+- Export results in JSON/CSV/Parquet.
+- Themed with Nigerian green-white-green accents.
 
-- **🔐 Security Module**: Surveillance-Liberty trade-off analysis with advanced threat detection
-- **⚕️ Healthcare Module**: Bias detection and fairness analysis in medical triage systems
-- **📊 Professional Dashboard**: Real-time analytics, visualization, and reporting
-- **🏗️ Scalable Architecture**: Production-ready with Docker, Redis, and async processing
+## Quick Start
+1. Clone: `git clone https://github.com/yourusername/gags-resilience-framework.git`
+2. Install: `pip install -r requirements.txt`
+3. Run: `streamlit run Home.py`
+4. Configure: Edit `.env` for custom settings (e.g., ENCRYPTION_KEY).
 
-## ✨ Features
+## Roadmap
+- [ ] Add unit tests with pytest.
+- [ ] Dockerize for easy deployment.
+- [ ] Integrate ML backends (e.g., scikit-learn for bias metrics).
+- [ ] Community contributions: Simulations for more sectors.
 
-### **Core Capabilities**
-- 🎯 **Multi-domain simulations**: Security & healthcare AI governance
-- ⚡ **Real-time analytics**: Interactive dashboards with Plotly visualizations
-- 🔄 **Async processing**: Concurrent simulation execution
-- 💾 **Intelligent caching**: Redis-backed performance optimization
-- 📤 **Multi-format exports**: JSON, CSV, Excel, Parquet, PDF reports
+## Contributors
+- Thomas (Abuja, NG) – Lead Architect
 
-### **Security Module**
-- Threat detection model training and evaluation
-- Surveillance-Liberty trade-off analysis
-- Adversarial attack simulation (data poisoning, evasion)
-- Resilience metrics and fairness scoring
-
-### **Healthcare Module**
-- Medical triage fairness analysis
-- Demographic bias detection (rural/urban, SES, age)
-- Bias mitigation strategies
-- Equity scoring and recommendations
-
-## 🏗️ Architecture
+Built with ❤️ for global AI equity.

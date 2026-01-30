@@ -416,54 +416,50 @@ class SecurityDashboard:
                 self.clear_simulations()
 
     def run_simulation(self, parameters: Dict[str, Any]):
-        """Execute a simulation with current parameters."""
         try:
-           # parameters = self.render_sidebar()
-
-            # Create progress placeholder
             progress_placeholder = st.empty()
             progress_bar = progress_placeholder.progress(0)
 
-            # Run simulation
-            with st.spinner(" Running simulation..."):
-                # Update progress
-                for i in range(1, 101, 10):
+            with st.spinner("🚀 Initializing Simulation Engine..."):
+                # Update progress visually
+                for i in range(1, 40, 5):
                     progress_bar.progress(i / 100)
-                    time.sleep(0.1)
+                    time.sleep(0.05)
 
-                # Run actual simulation (in real app, this would be async)
+                # Use a more robust way to run the async task in Streamlit
                 import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
 
-                result = loop.run_until_complete(
-                    self.orchestrator.run_simulation(
+                # Helper to run the async orchestrator
+                async def execute():
+                    return await self.orchestrator.run_simulation(
                         strategy=parameters['strategy'],
                         parameters=parameters
                     )
-                )
 
-                # Store result
-                st.session_state.current_result = result
-                st.session_state.simulation_history.append(result.to_dict())
-
-                # Cache result
-                self.cache_service.set(f"simulation_{result.simulation_id}", result)
+                # Create a new event loop for this thread to avoid conflicts with Streamlit
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result = new_loop.run_until_complete(execute())
+                finally:
+                    new_loop.close()
 
                 progress_bar.progress(1.0)
 
-            progress_placeholder.empty()
-            st.success("Simulation completed successfully!")
-
-            # Force rerun to update display
-            st.rerun()
+            if result:
+                st.session_state.current_result = result
+                # Convert to dict for history (JSON serializable)
+                st.session_state.simulation_history.append(result.to_dict())
+                st.success("✅ Simulation Completed!")
+                time.sleep(1)  # Give user a moment to see success
+                progress_placeholder.empty()
+                st.rerun()
 
         except Exception as e:
-            st.error(f" Simulation failed: {str(e)}")
-
+            st.error(f"❌ Simulation Engine Critical Failure: {str(e)}")
+            # Log the full error for debugging
+            import traceback
+            print(traceback.format_exc())
     def run_quick_simulation(self):
         """Run a quick simulation with default parameters."""
         # Implement quick simulation logic

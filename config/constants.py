@@ -2,6 +2,10 @@
 from enum import Enum, StrEnum
 from typing import Dict, Any, Final
 
+# config/constants.py
+PILLARS = ["Healthcare Equity", "National Security", "Sustainable Agrotech"]
+ISO_STANDARDS = "ISO/IEC 42001:2023"
+NIGERIA_EGOV_BILL_REF = "HB. 15.02.2026"
 
 class SimulationStatus(StrEnum):
     """Simulation status enumeration."""
