@@ -8,6 +8,7 @@ from plotly.subplots import make_subplots
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, recall_score, precision_score, confusion_matrix
 from sklearn.model_selection import train_test_split
+from components.governance_logic import AttackSeverity
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -295,12 +296,13 @@ with st.sidebar:
     col_run, col_reset = st.columns(2)
     with col_run:
         run_button = st.button(
-            "🚀 **Run Security Simulation**",
+            "Run",
             type="primary",
             use_container_width=True
         )
+
     with col_reset:
-        if st.button("🔄 Reset", use_container_width=True):
+        if st.button("Reset", use_container_width=True):
             st.session_state.security_run_history = []
             st.session_state.baseline_comparison = None
             st.rerun()
@@ -319,7 +321,7 @@ if run_button or st.session_state.security_run_history:
         if include_baseline:
             with st.spinner("🏃‍♂️ Running baseline simulation (no bias/attacks)..."):
                 # Baseline: no bias, no attack
-                X_base, y_base = generate_synthetic_data(
+                X_base, y_base, demographic_info_base = generate_synthetic_data(
                     n_samples=sample_size,
                     n_features=12,
                     decision_boundary=simulation_config.DECISION_BOUNDARY + 0.5
@@ -360,7 +362,7 @@ if run_button or st.session_state.security_run_history:
             with st.spinner(f"Running security simulation {i + 1}/{n_runs}..."):
 
                 # Generate security-themed data
-                X, y = generate_synthetic_data(
+                X, y,demographic_info = generate_synthetic_data(
                     n_samples=sample_size,
                     n_features=12,
                     decision_boundary=simulation_config.DECISION_BOUNDARY + 0.5
@@ -368,10 +370,20 @@ if run_button or st.session_state.security_run_history:
 
                 # Apply selected biases
                 for bias_type in selected_biases:
-                    X, y, _ = apply_bias(X, y, bias_type, bias_intensity)
+                    X, y,demographic_info = apply_bias(X, y, bias_type, bias_intensity,demographic_info, severity=AttackSeverity.MEDIUM)
+                attack_type_mapping = {
+                    "Data Poisoning": "label_flipping",
+                    "Evasion Attacks": "feature_noise",
+                    "Model Inversion": "label_smoothing",
+                    "Backdoor Attacks": "backdoor"
+                }
+                internal_attack_type = attack_type_mapping.get(attack_type, "label_flipping")
 
                 # Apply poisoning attack with selected type
-                X_p, y_p = simulate_data_poisoning(X, y, poison_rate)
+                X_p, y_p,demographic_info = simulate_data_poisoning(X, y, poison_rate,
+     attack_type=internal_attack_type,
+     demographic_info=demographic_info,
+     targeted=False)
 
                 # Apply surveillance effect (inverse relationship with noise)
                 surveillance_multiplier = surveillance_level / 100
@@ -645,7 +657,12 @@ if run_button or st.session_state.security_run_history:
                 y0=0.8, y1=1.0,
                 line=dict(color="Green", width=2, dash="dash"),
                 fillcolor="rgba(0, 255, 0, 0.1)",
-                label="Optimal Zone"
+                label=dict(
+                    text="Optimal Zone",
+                    font=dict(size=12, color="green"),
+                    xanchor="center",
+                    yanchor="middle"
+                )
             )
 
             fig.add_annotation(

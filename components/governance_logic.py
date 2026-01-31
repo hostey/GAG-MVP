@@ -349,76 +349,401 @@ def simulate_data_poisoning(
         y: np.ndarray,
         poison_rate: float = simulation_config.ATTACK_TYPES["data_poisoning"]["default"],
         attack_type: str = "label_flipping",
+        targeted: bool = False,
         demographic_info: Optional[np.ndarray] = None,
-        targeted: bool = False
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        target_group: Optional[int] = None,
+        attack_sophistication: str = "medium",
+        feature_columns: Optional[List[int]] = None,
+        **kwargs
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """
-    Simulate various data poisoning attacks.
+    Simulate various data poisoning attacks with configurable sophistication.
 
     Args:
-        X: Feature matrix
-        y: Labels
-        poison_rate: Proportion of data to poison
-        attack_type: Type of poisoning attack
-        demographic_info: Demographic information for targeted attacks
+        X: Feature matrix of shape (n_samples, n_features)
+        y: Target values (labels or continuous values)
+        poison_rate: Proportion of data to poison (0-1)
+        attack_type: Type of poisoning attack:
+            - 'label_flipping': Flip labels to corrupt learning
+            - 'feature_noise': Add adversarial noise to features
+            - 'backdoor': Add backdoor pattern to trigger misclassification
+            - 'label_smoothing': Make labels ambiguous/uncertain
+            - 'targeted_mislabeling': Strategic mislabeling of specific classes
+            - 'outlier_injection': Inject extreme outlier samples
+            - 'gradient_alignment': Optimized poisoning for model degradation
         targeted: Whether attack targets specific groups
+        demographic_info: Demographic group information for targeted attacks
+        target_group: Specific group to target (if targeted=True)
+        attack_sophistication: Level of attack sophistication ('low', 'medium', 'high', 'advanced')
+        feature_columns: Specific feature columns to attack (None = all)
+        **kwargs: Additional attack-specific parameters
 
     Returns:
-        Poisoned (X, y, demographic_info)
+        Tuple of (poisoned_X, poisoned_y, demographic_info)
+
+    Examples:
+        # Basic label flipping
+        X_poisoned, y_poisoned = simulate_data_poisoning(X, y, poison_rate=0.1)
+
+        # Targeted backdoor attack
+        X_poisoned, y_poisoned = simulate_data_poisoning(
+            X, y, attack_type='backdoor', targeted=True,
+            demographic_info=demographics, target_group=0
+        )
     """
     if poison_rate <= 0:
         return X, y, demographic_info
 
     n_samples = len(X)
+    n_features = X.shape[1]
     n_poison = int(n_samples * poison_rate)
 
     if n_poison == 0:
         return X, y, demographic_info
 
+    # Set attack sophistication parameters
+    sophistication_params = {
+        "low": {"noise_scale": 0.5, "pattern_strength": 0.3, "strategic": False},
+        "medium": {"noise_scale": 1.0, "pattern_strength": 0.6, "strategic": True},
+        "high": {"noise_scale": 1.5, "pattern_strength": 0.9, "strategic": True},
+        "advanced": {"noise_scale": 2.0, "pattern_strength": 1.2, "strategic": True}
+    }
+    attack_params = sophistication_params.get(attack_sophistication.lower(), sophistication_params["medium"])
+
+    # Select samples to poison
     if targeted and demographic_info is not None:
-        # Target specific demographic group
-        target_group = 0  # Minority group
+        if target_group is None:
+            # Default target: minority group
+            unique_groups, counts = np.unique(demographic_info, return_counts=True)
+            target_group = unique_groups[np.argmin(counts)]
+
         target_indices = np.where(demographic_info == target_group)[0]
-        if len(target_indices) > n_poison:
-            poison_idx = np.random.choice(target_indices, n_poison, replace=False)
+
+        if len(target_indices) == 0:
+            logger.warning(f"Target group {target_group} not found. Switching to random poisoning.")
+            poison_idx = np.random.choice(n_samples, n_poison, replace=False)
         else:
-            poison_idx = target_indices
-            logger.warning(f"Target group too small for poisoning rate. Poisoned {len(poison_idx)} samples.")
+            if len(target_indices) < n_poison:
+                logger.warning(f"Target group too small ({len(target_indices)} samples). "
+                               f"Poisoning all {len(target_indices)} available samples.")
+                n_poison = len(target_indices)
+                poison_idx = target_indices
+            else:
+                poison_idx = np.random.choice(target_indices, n_poison, replace=False)
+
+        logger.info(f"Targeted poisoning: {n_poison} samples from group {target_group}")
     else:
         # Random poisoning
         poison_idx = np.random.choice(n_samples, n_poison, replace=False)
 
+    X_poisoned = X.copy()
+    y_poisoned = y.copy()
+
+    # Default feature columns to attack (if not specified)
+    if feature_columns is None:
+        feature_columns = list(range(n_features))
+
+    # Apply different attack types
     if attack_type == "label_flipping":
-        # Flip labels of poisoned samples
-        y[poison_idx] = 1 - y[poison_idx]
+        # Traditional label flipping attack
+        y_poisoned[poison_idx] = 1 - y_poisoned[poison_idx]
+
+        # For multi-class classification (if needed)
+        if len(np.unique(y)) > 2:
+            # Randomly assign to a different class (not just binary flip)
+            unique_classes = np.unique(y)
+            for idx in poison_idx:
+                current_class = y_poisoned[idx]
+                other_classes = [c for c in unique_classes if c != current_class]
+                if other_classes:
+                    y_poisoned[idx] = np.random.choice(other_classes)
+
+        logger.info(f"Label flipping: Flipped {n_poison} labels")
 
     elif attack_type == "feature_noise":
         # Add adversarial noise to features
-        noise_magnitude = simulation_config.NOISE_STD * 3
-        X[poison_idx] += np.random.normal(0, noise_magnitude, (n_poison, X.shape[1]))
+        noise_scale = attack_params["noise_scale"]
+
+        # Add Gaussian noise to poisoned samples
+        noise = np.random.normal(0, noise_scale, (n_poison, len(feature_columns)))
+
+        # Optionally, make noise strategic (correlated with features)
+        if attack_params["strategic"]:
+            # Make noise proportional to feature values (harder to detect)
+            for i, col in enumerate(feature_columns):
+                feature_mean = np.mean(X[:, col])
+                noise[:, i] *= (X_poisoned[poison_idx, col] - feature_mean) / (np.std(X[:, col]) + 1e-8)
+
+        X_poisoned[poison_idx[:, None], feature_columns] += noise
+
+        logger.info(f"Feature noise: Added noise (scale={noise_scale}) to {n_poison} samples")
 
     elif attack_type == "backdoor":
-        # Add backdoor pattern to features
-        backdoor_pattern = np.zeros(X.shape[1])
-        backdoor_pattern[:3] = 2.0  # Strong signal in first 3 features
-        X[poison_idx] += backdoor_pattern
-        # Flip labels for backdoored samples
-        y[poison_idx] = 1 - y[poison_idx]
+        # Add a backdoor pattern that triggers misclassification
+        pattern_strength = attack_params["pattern_strength"]
+
+        # Create a backdoor pattern (e.g., specific feature values)
+        backdoor_pattern = np.zeros(n_features)
+
+        # Choose random features for the backdoor
+        n_backdoor_features = max(1, int(n_features * 0.3))  # Use 30% of features
+        backdoor_features = np.random.choice(feature_columns, n_backdoor_features, replace=False)
+
+        # Set pattern (alternating positive/negative for subtlety)
+        for i, feat in enumerate(backdoor_features):
+            backdoor_pattern[feat] = pattern_strength * (1 if i % 2 == 0 else -1)
+
+        # Add pattern to poisoned samples
+        X_poisoned[poison_idx] += backdoor_pattern
+
+        # Flip labels for poisoned samples
+        if len(np.unique(y)) <= 2:  # Binary classification
+            y_poisoned[poison_idx] = 1 - y_poisoned[poison_idx]
+        else:  # Multi-class
+            for idx in poison_idx:
+                current_class = y_poisoned[idx]
+                other_classes = [c for c in np.unique(y) if c != current_class]
+                y_poisoned[idx] = np.random.choice(other_classes) if other_classes else current_class
+
+        logger.info(f"Backdoor attack: Added pattern to {n_poison} samples, flipped labels")
 
     elif attack_type == "label_smoothing":
-        # Make labels less certain (soft poisoning)
+        # Make labels less certain/ambiguous
+        if len(np.unique(y)) <= 2:  # Binary
+            # For binary, we can make labels probabilistic
+            # Convert to float for probabilistic labels
+            y_poisoned = y_poisoned.astype(float)
+
+            for idx in poison_idx:
+                # Add uncertainty: move label toward 0.5 (uncertain)
+                original = y_poisoned[idx]
+                uncertainty = np.random.uniform(0.3, 0.7)
+                y_poisoned[idx] = original * (1 - uncertainty) + (1 - original) * uncertainty
+        else:
+            # For multi-class, assign random labels with some probability
+            unique_classes = np.unique(y)
+            for idx in poison_idx:
+                if np.random.rand() < 0.7:  # 70% chance to mislabel
+                    current_class = y_poisoned[idx]
+                    other_classes = [c for c in unique_classes if c != current_class]
+                    if other_classes:
+                        y_poisoned[idx] = np.random.choice(other_classes)
+
+        logger.info(f"Label smoothing: Made {n_poison} labels ambiguous")
+
+    elif attack_type == "targeted_mislabeling":
+        # Strategic mislabeling: only flip specific classes
+        if len(np.unique(y)) <= 2:
+            # For binary, flip only one class (e.g., make all 1's become 0)
+            class_to_flip = 1  # Default: flip positive class
+            mask = (y_poisoned[poison_idx] == class_to_flip)
+            flippable_idx = poison_idx[mask]
+
+            if len(flippable_idx) > 0:
+                y_poisoned[flippable_idx] = 1 - class_to_flip
+                logger.info(f"Targeted mislabeling: Flipped {len(flippable_idx)} samples from class {class_to_flip}")
+            else:
+                logger.info(f"No samples of class {class_to_flip} in poisoned set")
+        else:
+            # For multi-class, flip specific classes to specific other classes
+            # This would require additional configuration
+            pass
+
+    elif attack_type == "outlier_injection":
+        # Inject extreme outliers
+        outlier_strength = attack_params["noise_scale"] * 3
+
+        # Create extreme outliers in feature space
+        for col in feature_columns:
+            feature_mean = np.mean(X[:, col])
+            feature_std = np.std(X[:, col])
+
+            # Add extreme values (outliers)
+            outliers = np.random.choice([-1, 1], n_poison) * outlier_strength * feature_std
+            X_poisoned[poison_idx, col] = feature_mean + outliers
+
+        # Also flip labels for outliers
+        if len(np.unique(y)) <= 2:
+            y_poisoned[poison_idx] = 1 - y_poisoned[poison_idx]
+
+        logger.info(f"Outlier injection: Created {n_poison} extreme outliers")
+
+    elif attack_type == "gradient_alignment":
+        # More sophisticated: poison samples to maximize model error
+        # This is a simplified version
+        gradient_strength = attack_params["pattern_strength"]
+
+        # Estimate gradient direction (simplified)
+        # In reality, this would require access to model gradients
         for idx in poison_idx:
-            if np.random.rand() < 0.5:
-                y[idx] = 1 - y[idx]
-            # Add some random flips
-            if np.random.rand() < 0.2:
-                y[idx] = 1 - y[idx]
+            # Create adversarial perturbation
+            perturbation = np.random.normal(0, gradient_strength, n_features)
 
-    logger.info(f"Applied {attack_type} poisoning to {n_poison} samples ({poison_rate:.1%})")
+            # Align perturbation with feature correlations to be stealthy
+            if n_features > 1:
+                # Simple correlation-based perturbation
+                for col in feature_columns[:min(3, len(feature_columns))]:
+                    if col + 1 < n_features:
+                        X_poisoned[idx, col + 1] += perturbation[col] * 0.5
 
-    return X, y, demographic_info
+            X_poisoned[idx, feature_columns] += perturbation[:len(feature_columns)]
+
+        # Flip labels
+        if len(np.unique(y)) <= 2:
+            y_poisoned[poison_idx] = 1 - y_poisoned[poison_idx]
+
+        logger.info(f"Gradient-aligned poisoning: {n_poison} samples")
+
+    else:
+        logger.warning(f"Unknown attack type: {attack_type}. Using default label flipping.")
+        y_poisoned[poison_idx] = 1 - y_poisoned[poison_idx]
+
+    # Additional effects based on task type (classification vs regression)
+    is_classification = len(np.unique(y)) <= 10  # Heuristic: <=10 unique values = classification
+
+    if not is_classification and attack_type in ["label_flipping", "backdoor"]:
+        # For regression tasks, add noise and scaling instead of label flipping
+        logger.info("Regression task detected: Adding noise/scaling instead of label flips")
+
+        # Scale values randomly
+        y_poisoned[poison_idx] *= np.random.uniform(0.4, 1.6, n_poison)
+
+        # Add significant noise
+        y_std = np.std(y)
+        y_poisoned[poison_idx] += np.random.normal(0, y_std * 0.5, n_poison)
+
+    # Optional: Add subtle feature correlations to make poisoning harder to detect
+    if attack_params["strategic"] and np.random.rand() < 0.5:
+        # Make poisoned samples slightly correlated with each other
+        if len(poison_idx) > 1:
+            # Create small correlation between poisoned samples
+            correlation_strength = 0.2
+            base_sample = X_poisoned[poison_idx[0]]
+            for i in range(1, len(poison_idx)):
+                mix = np.random.rand(n_features) < correlation_strength
+                X_poisoned[poison_idx[i]] = (
+                        X_poisoned[poison_idx[i]] * (1 - mix) +
+                        base_sample * mix
+                )
+
+    # Log attack summary
+    attack_summary = {
+        "attack_type": attack_type,
+        "poison_rate": poison_rate,
+        "n_poisoned": n_poison,
+        "targeted": targeted,
+        "target_group": target_group if targeted else None,
+        "sophistication": attack_sophistication,
+        "features_affected": len(feature_columns)
+    }
+
+    logger.info(f"Poisoning attack completed: {attack_summary}")
+
+    return X_poisoned, y_poisoned, demographic_info
 
 
+# Helper function for backward compatibility
+def simple_data_poisoning(
+        X: np.ndarray,
+        y: np.ndarray,
+        poison_rate: float = simulation_config.ATTACK_TYPES["data_poisoning"]["default"],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Simple wrapper for backward compatibility.
+    Uses default label flipping attack.
+    """
+    X_poisoned, y_poisoned, _ = simulate_data_poisoning(
+        X, y, poison_rate, attack_type="label_flipping"
+    )
+    return X_poisoned, y_poisoned
+
+
+# Optional: Function to detect poisoning (for defensive purposes)
+def detect_poisoning_attempt(
+        X: np.ndarray,
+        y: np.ndarray,
+        detection_method: str = "statistical",
+        contamination: float = 0.1,
+        **kwargs
+) -> Dict[str, Any]:
+    """
+    Attempt to detect poisoned samples in the dataset.
+
+    Args:
+        X: Feature matrix
+        y: Labels
+        detection_method: Detection approach
+            - 'statistical': Statistical outlier detection
+            - 'clustering': Cluster-based anomaly detection
+            - 'model_based': Train models to detect inconsistencies
+        contamination: Expected proportion of poisoned samples
+        **kwargs: Method-specific parameters
+
+    Returns:
+        Dictionary with detection results
+    """
+    from sklearn.ensemble import IsolationForest
+    from sklearn.neighbors import LocalOutlierFactor
+    from sklearn.svm import OneClassSVM
+
+    n_samples = len(X)
+
+    if detection_method == "statistical":
+        # Use Isolation Forest for outlier detection
+        detector = IsolationForest(
+            contamination=contamination,
+            random_state=42,
+            **kwargs
+        )
+        predictions = detector.fit_predict(X)
+
+        # -1 for outliers (potential poison), 1 for inliers
+        is_outlier = (predictions == -1)
+
+    elif detection_method == "clustering":
+        # Use Local Outlier Factor
+        detector = LocalOutlierFactor(
+            contamination=contamination,
+            novelty=False,
+            **kwargs
+        )
+        predictions = detector.fit_predict(X)
+        is_outlier = (predictions == -1)
+
+    elif detection_method == "model_based":
+        # Train a model to detect label-feature inconsistencies
+        # This is a simplified version
+        from sklearn.model_selection import cross_val_predict
+        from sklearn.ensemble import RandomForestClassifier
+
+        # Use a model to predict labels, then flag samples where prediction
+        # confidence is low despite simple patterns
+        model = RandomForestClassifier(n_estimators=50, random_state=42)
+
+        # Get cross-validated predictions
+        y_pred = cross_val_predict(model, X, y, cv=5, method='predict_proba')
+
+        # Confidence of true class
+        confidence = y_pred[np.arange(len(y)), y.astype(int)]
+
+        # Flag low-confidence samples as potential poison
+        threshold = np.percentile(confidence, contamination * 100)
+        is_outlier = confidence < threshold
+
+    else:
+        raise ValueError(f"Unknown detection method: {detection_method}")
+
+    n_detected = np.sum(is_outlier)
+    detection_rate = n_detected / n_samples
+
+    return {
+        "detection_method": detection_method,
+        "n_detected": n_detected,
+        "detection_rate": detection_rate,
+        "contamination_estimate": contamination,
+        "outlier_indices": np.where(is_outlier)[0],
+        "is_outlier": is_outlier
+    }
 # ───────────────────────────────────────────────
 # Fairness Metrics
 # ───────────────────────────────────────────────
