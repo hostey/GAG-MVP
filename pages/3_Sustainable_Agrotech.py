@@ -322,7 +322,7 @@ with st.sidebar:
     col_run, col_reset = st.columns(2)
     with col_run:
         run_button = st.button(
-            "🚜 **Run Agrotech Simulation**",
+            "🚜 **Run**",
             type="primary",
             use_container_width=True
         )

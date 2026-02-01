@@ -449,6 +449,7 @@ if run_button or st.session_state.security_run_history:
                     "poison_rate": poison_rate,
                     "bias_intensity": bias_intensity,
                     "attack_sophistication": attack_sophistication,
+
                     "oversight": oversight_level,
                     "data_retention": data_retention,
                     "biases": ", ".join(selected_biases) if selected_biases else "None"

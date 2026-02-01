@@ -94,12 +94,17 @@ st.markdown("""
         transition: all 0.3s ease;
         border: 2px solid transparent;
         height: 100%;
+        text-decoration: none !important;
+        display: block;
+        color: inherit;
     }
 
     .module-card:hover {
         transform: scale(1.02);
         box-shadow: 0 15px 30px rgba(0,0,0,0.1);
         border-color: var(--module-color);
+        text-decoration: none;
+        color: inherit;
     }
 
     .quick-start-card {
@@ -118,7 +123,7 @@ st.markdown("""
         box-shadow: 0 5px 15px rgba(52, 152, 219, 0.1);
     }
 
-    .gradient-button {
+    .stButton>button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         padding: 0.8rem 2rem;
@@ -131,9 +136,10 @@ st.markdown("""
         display: inline-block;
         text-align: center;
         margin: 0.5rem;
+        width: 100%;
     }
 
-    .gradient-button:hover {
+    .stButton>button:hover {
         transform: translateY(-3px);
         box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
         color: white;
@@ -177,6 +183,11 @@ st.markdown("""
         color: white;
     }
 
+    .badge-active {
+        background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+        color: white;
+    }
+
     .stat-number {
         font-size: 2.5rem;
         font-weight: bold;
@@ -199,6 +210,39 @@ st.markdown("""
         background: linear-gradient(90deg, transparent, #667eea, transparent);
         margin: 2rem 0;
         border-radius: 3px;
+    }
+
+    .module-link {
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .module-link:hover {
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .launch-button {
+        background: linear-gradient(135deg, var(--btn-color-start), var(--btn-color-end));
+        color: white;
+        padding: 0.8rem 1.5rem;
+        border-radius: 50px;
+        border: none;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        display: inline-block;
+        text-align: center;
+        width: 100%;
+        margin-top: 1rem;
+    }
+
+    .launch-button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        color: white;
+        text-decoration: none;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -240,8 +284,8 @@ with col1:
     st.markdown("""
     <div class="stats-card" style="--card-color:#667eea;">
         <div style="font-size:0.9rem; color:#7f8c8d;">Simulations Run</div>
-        <div class="stat-number">1,247</div>
-        <div style="font-size:0.8rem; color:#27ae60;">↑ 24% this month</div>
+        <div class="stat-number">2,489</div>
+        <div style="font-size:0.8rem; color:#27ae60;">↑ 38% this month</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -249,8 +293,8 @@ with col2:
     st.markdown("""
     <div class="stats-card" style="--card-color:#4ecdc4;">
         <div style="font-size:0.9rem; color:#7f8c8d;">Bias Types Analyzed</div>
-        <div class="stat-number">8</div>
-        <div style="font-size:0.8rem; color:#3498db;">+2 new types</div>
+        <div class="stat-number">12</div>
+        <div style="font-size:0.8rem; color:#3498db;">+4 new types</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -258,8 +302,8 @@ with col3:
     st.markdown("""
     <div class="stats-card" style="--card-color:#ff6b6b;">
         <div style="font-size:0.9rem; color:#7f8c8d;">Attack Vectors</div>
-        <div class="stat-number">6</div>
-        <div style="font-size:0.8rem; color:#e74c3c;">Critical: 2</div>
+        <div class="stat-number">9</div>
+        <div style="font-size:0.8rem; color:#e74c3c;">Critical: 3</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -267,198 +311,277 @@ with col4:
     st.markdown("""
     <div class="stats-card" style="--card-color:#f39c12;">
         <div style="font-size:0.9rem; color:#7f8c8d;">Active Users</div>
-        <div class="stat-number">356</div>
-        <div style="font-size:0.8rem; color:#2ecc71;">↑ 18% this week</div>
+        <div class="stat-number">842</div>
+        <div style="font-size:0.8rem; color:#2ecc71;">↑ 32% this week</div>
     </div>
     """, unsafe_allow_html=True)
 
 st.divider()
 
 # ───────────────────────────────────────────────
-# Featured Modules Section
+# All Simulation Modules Section
 # ───────────────────────────────────────────────
 st.markdown('<a name="modules"></a>', unsafe_allow_html=True)
 st.markdown("""
 <div style="margin-bottom:3rem;">
-    <h2 style="color:#2c3e50;">🚀 Featured Simulation Modules</h2>
+    <h2 style="color:#2c3e50;">🚀 All Simulation Modules</h2>
     <p style="color:#7f8c8d;">
         Dive into real-world AI governance challenges across different domains
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-# Module cards in columns
+# First row of modules
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.markdown("""
-    <div class="module-card" style="--module-color:#667eea;">
-        <div style="display:flex; align-items:center; margin-bottom:1rem;">
-            <div style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                        padding:0.8rem; border-radius:12px; margin-right:1rem;">
-                <span style="font-size:1.5rem;">🏥</span>
+    st.markdown(f"""
+        <div class="module-card" style="--module-color:#667eea;">
+            <div style="display:flex; align-items:center; margin-bottom:1rem;">
+                <div style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                            padding:0.8rem; border-radius:12px; margin-right:1rem;">
+                    <span style="font-size:1.5rem;">🏥</span>
+                </div>
+                <div>
+                    <h3 style="margin:0; color:#2c3e50;">Healthcare Equity</h3>
+                    <span class="badge badge-active">Active</span>
+                </div>
             </div>
-            <div>
-                <h3 style="margin:0; color:#2c3e50;">Healthcare Equity</h3>
-                <span class="badge badge-update">Updated</span>
+            <p style="color:#7f8c8d; margin-bottom:1.5rem;">
+                Test how different types of bias and data poisoning affect 
+                model fairness and accuracy in healthcare AI systems.
+            </p>
+            <div style="margin-bottom:1rem;">
+                <span style="font-size:0.8rem; color:#667eea;">🔬 Key Metrics:</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+                    <span style="background:#eef2ff; color:#667eea; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Fairness Score
+                    </span>
+                    <span style="background:#eef2ff; color:#667eea; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Accuracy Result
+                    </span>
+                    <span style="background:#eef2ff; color:#667eea; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Bias Impact
+                    </span>
+                </div>
             </div>
         </div>
-        <p style="color:#7f8c8d; margin-bottom:1.5rem;">
-            Test how different types of bias and data poisoning affect 
-            model fairness and accuracy in healthcare AI systems.
-        </p>
-        <div style="margin-bottom:1rem;">
-            <span style="font-size:0.8rem; color:#667eea;">🔬 Key Metrics:</span>
-            <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
-                <span style="background:#eef2ff; color:#667eea; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Fairness Score
-                </span>
-                <span style="background:#eef2ff; color:#667eea; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Accuracy
-                </span>
-                <span style="background:#eef2ff; color:#667eea; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Bias Impact
-                </span>
-            </div>
-        </div>
-        <a href="/1_🏥_Healthcare_Equity" class="gradient-button" style="width:100%; text-align:center; display:block;">
-            Launch Simulation →
-        </a>
-    </div>
     """, unsafe_allow_html=True)
+    if st.button(
+        "🚀 Launch Simulation →",
+        key="launch_healthcare_equity",
+        use_container_width=True
+    ):
+        st.switch_page("pages/02_Healthcare_Equity.py")
 
 with col2:
-    st.markdown("""
-    <div class="module-card" style="--module-color:#2ecc71;">
-        <div style="display:flex; align-items:center; margin-bottom:1rem;">
-            <div style="background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); 
-                        padding:0.8rem; border-radius:12px; margin-right:1rem;">
-                <span style="font-size:1.5rem;">🌱</span>
+    st.markdown(f"""
+        <div class="module-card" style="--module-color:#e74c3c;">
+            <div style="display:flex; align-items:center; margin-bottom:1rem;">
+                <div style="background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); 
+                            padding:0.8rem; border-radius:12px; margin-right:1rem;">
+                    <span style="font-size:1.5rem;">🛡️</span>
+                </div>
+                <div>
+                    <h3 style="margin:0; color:#2c3e50;">National Security</h3>
+                    <span class="badge badge-active">Active</span>
+                </div>
             </div>
-            <div>
-                <h3 style="margin:0; color:#2c3e50;">Sustainable Agrotech</h3>
-                <span class="badge badge-new">New</span>
+            <p style="color:#7f8c8d; margin-bottom:1.5rem;">
+                Balance threat detection with civil liberties in AI-powered 
+                surveillance systems. Test bias and attack resilience.
+            </p>
+            <div style="margin-bottom:1rem;">
+                <span style="font-size:0.8rem; color:#e74c3c;">🎯 Key Metrics:</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+                    <span style="background:#fdedec; color:#e74c3c; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Detection Rate
+                    </span>
+                    <span style="background:#fdedec; color:#e74c3c; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Liberty Score
+                    </span>
+                    <span style="background:#fdedec; color:#e74c3c; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        False Positives
+                    </span>
+                </div>
             </div>
         </div>
-        <p style="color:#7f8c8d; margin-bottom:1.5rem;">
-            Explore how bias, climate stress, and data attacks affect 
-            AI-driven crop yield predictions and farmer equity.
-        </p>
-        <div style="margin-bottom:1rem;">
-            <span style="font-size:0.8rem; color:#2ecc71;">🌾 Key Metrics:</span>
-            <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
-                <span style="background:#e8f8f5; color:#27ae60; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Equity Score
-                </span>
-                <span style="background:#e8f8f5; color:#27ae60; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Sustainability
-                </span>
-                <span style="background:#e8f8f5; color:#27ae60; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Yield Accuracy
-                </span>
-            </div>
-        </div>
-        <a href="/3_🌱_Sustainable_Agrotech" class="gradient-button" 
-           style="width:100%; text-align:center; display:block; background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);">
-            Launch Simulation →
-        </a>
-    </div>
     """, unsafe_allow_html=True)
+    if st.button(
+        "🚀 Launch Simulation →",
+        key="launch_National_Security",
+        use_container_width=True
+    ):
+        st.switch_page("pages/2_National_Security.py")
+
 
 with col3:
-    st.markdown("""
-    <div class="module-card" style="--module-color:#e74c3c;">
-        <div style="display:flex; align-items:center; margin-bottom:1rem;">
-            <div style="background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); 
-                        padding:0.8rem; border-radius:12px; margin-right:1rem;">
-                <span style="font-size:1.5rem;">🛡️</span>
+    st.markdown(f"""
+        <div class="module-card" style="--module-color:#2ecc71;">
+            <div style="display:flex; align-items:center; margin-bottom:1rem;">
+                <div style="background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); 
+                            padding:0.8rem; border-radius:12px; margin-right:1rem;">
+                    <span style="font-size:1.5rem;">🌱</span>
+                </div>
+                <div>
+                    <h3 style="margin:0; color:#2c3e50;">Sustainable Agrotech</h3>
+                    <span class="badge badge-active">Active</span>
+                </div>
             </div>
-            <div>
-                <h3 style="margin:0; color:#2c3e50;">National Security</h3>
-                <span class="badge badge-update">Updated</span>
+            <p style="color:#7f8c8d; margin-bottom:1.5rem;">
+                Explore how bias, climate stress, and data attacks affect 
+                AI-driven crop yield predictions and farmer equity.
+            </p>
+            <div style="margin-bottom:1rem;">
+                <span style="font-size:0.8rem; color:#2ecc71;">🌾 Key Metrics:</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+                    <span style="background:#e8f8f5; color:#27ae60; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Equity Score
+                    </span>
+                    <span style="background:#e8f8f5; color:#27ae60; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Sustainability
+                    </span>
+                    <span style="background:#e8f8f5; color:#27ae60; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Yield Accuracy
+                    </span>
+                </div>
             </div>
         </div>
-        <p style="color:#7f8c8d; margin-bottom:1.5rem;">
-            Balance threat detection with civil liberties in AI-powered 
-            surveillance systems. Test bias and attack resilience.
-        </p>
-        <div style="margin-bottom:1rem;">
-            <span style="font-size:0.8rem; color:#e74c3c;">🎯 Key Metrics:</span>
-            <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
-                <span style="background:#fdedec; color:#e74c3c; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Detection Rate
-                </span>
-                <span style="background:#fdedec; color:#e74c3c; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    Liberty Score
-                </span>
-                <span style="background:#fdedec; color:#e74c3c; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                    False Positives
-                </span>
+    """, unsafe_allow_html=True)
+    if st.button(
+        "🚀 Launch Simulation →",
+        key="launch_Sustainable_Agrotech",
+        use_container_width=True
+    ):
+        st.switch_page("pages/3_Sustainable_Agrotech.py")
+
+# Second row of modules
+st.markdown("<br>", unsafe_allow_html=True)
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    st.markdown(f"""
+        <div class="module-card" style="--module-color:#3498db;">
+            <div style="display:flex; align-items:center; margin-bottom:1rem;">
+                <div style="background:linear-gradient(135deg, #3498db 0%, #2980b9 100%); 
+                            padding:0.8rem; border-radius:12px; margin-right:1rem;">
+                    <span style="font-size:1.5rem;">🎓</span>
+                </div>
+                <div>
+                    <h3 style="margin:0; color:#2c3e50;">Education Equity</h3>
+                    <span class="badge badge-active">Active</span>
+                </div>
+            </div>
+            <p style="color:#7f8c8d; margin-bottom:1.5rem;">
+                Explore fairness in admissions, grading, resource allocation, 
+                and student support systems across demographic groups.
+                Explore Education Equity
+            </p>
+            <div style="margin-bottom:1rem;">
+                <span style="font-size:0.8rem; color:#3498db;">📚 Key Metrics:</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+                    <span style="background:#e8f4f8; color:#3498db; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Opportunity Score
+                    </span>
+                    <span style="background:#e8f4f8; color:#3498db; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Access Equity
+                    </span>
+                    <span style="background:#e8f4f8; color:#3498db; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Performance Gap
+                    </span>
+                </div>
             </div>
         </div>
-        <a href="/2_🛡️_National_Security" class="gradient-button" 
-           style="width:100%; text-align:center; display:block; background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
-            Launch Simulation →
-        </a>
-    </div>
+    """, unsafe_allow_html=True)
+    if st.button(
+        "🚀 Launch Simulation →",
+        key="launch_Education_Equity",
+        use_container_width=True
+    ):
+        st.switch_page("pages/Education_Equity.py")
+
+
+with col5:
+    st.markdown(f"""
+        <div class="module-card" style="--module-color:#9b59b6;">
+            <div style="display:flex; align-items:center; margin-bottom:1rem;">
+                <div style="background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); 
+                            padding:0.8rem; border-radius:12px; margin-right:1rem;">
+                    <span style="font-size:1.5rem;">⚖️</span>
+                </div>
+                <div>
+                    <h3 style="margin:0; color:#2c3e50;">Judicial Systems</h3>
+                    <span class="badge badge-active">Active</span>
+                </div>
+            </div>
+            <p style="color:#7f8c8d; margin-bottom:1.5rem;">
+                Analyze bias in risk assessment, sentencing algorithms, 
+                and their impact on different demographic groups across judicial systems.
+            </p>
+            <div style="margin-bottom:1rem;">
+                <span style="font-size:0.8rem; color:#9b59b6;">⚖️ Key Metrics:</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+                    <span style="background:#f4ecf7; color:#9b59b6; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Rule of Law
+                    </span>
+                    <span style="background:#f4ecf7; color:#9b59b6; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Fairness Index
+                    </span>
+                    <span style="background:#f4ecf7; color:#9b59b6; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Disparity Impact
+                    </span>
+                </div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+    if st.button(
+        "🚀 Launch Simulation →",
+        key="launch_Judicial_System",
+        use_container_width=True
+    ):
+        st.switch_page("pages/Judicial_System.py")
+
+with col6:
+    st.markdown(f"""
+        <div class="module-card" style="--module-color:#f39c12;">
+            <div style="display:flex; align-items:center; margin-bottom:1rem;">
+                <div style="background:linear-gradient(135deg, #f39c12 0%, #d35400 100%); 
+                            padding:0.8rem; border-radius:12px; margin-right:1rem;">
+                    <span style="font-size:1.5rem;">💰</span>
+                </div>
+                <div>
+                    <h3 style="margin:0; color:#2c3e50;">Financial Inclusion</h3>
+                    <span class="badge badge-new">New</span>
+                </div>
+            </div>
+            <p style="color:#7f8c8d; margin-bottom:1.5rem;">
+                Explore AI fairness in credit scoring, loan approvals, 
+                and access to banking services across demographic and income groups.
+            </p>
+            <div style="margin-bottom:1rem;">
+                <span style="font-size:0.8rem; color:#f39c12;">🏦 Key Metrics:</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+                    <span style="background:#fef9e7; color:#f39c12; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Inclusion Score
+                    </span>
+                    <span style="background:#fef9e7; color:#f39c12; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Approval Gap
+                    </span>
+                    <span style="background:#fef9e7; color:#f39c12; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                        Economic Impact
+                    </span>
+                </div>
+            </div>
+        </div>
+ 
     """, unsafe_allow_html=True)
 
-# Coming soon module
-st.markdown("""
-<div style="margin:3rem 0;">
-    <h3 style="color:#2c3e50;">✨ Coming Soon</h3>
-</div>
-""", unsafe_allow_html=True)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown("""
-    <div style="background:linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); 
-                padding:2rem; border-radius:15px; text-align:center; opacity:0.8;">
-        <div style="font-size:2rem; margin-bottom:1rem;">🏦</div>
-        <h4 style="margin:0; color:#2c3e50;">Financial Inclusion</h4>
-        <p style="color:#7f8c8d; font-size:0.9rem;">
-            AI fairness in credit scoring and financial services
-        </p>
-        <span style="background:rgba(255,255,255,0.5); color:#7f8c8d; 
-                    padding:0.3rem 1rem; border-radius:20px; font-size:0.8rem;">
-            Q1 2024
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    st.markdown("""
-    <div style="background:linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); 
-                padding:2rem; border-radius:15px; text-align:center; opacity:0.8;">
-        <div style="font-size:2rem; margin-bottom:1rem;">👩‍⚖️</div>
-        <h4 style="margin:0; color:#2c3e50;">Judicial Systems</h4>
-        <p style="color:#7f8c8d; font-size:0.9rem;">
-            Bias in risk assessment and sentencing algorithms
-        </p>
-        <span style="background:rgba(255,255,255,0.5); color:#7f8c8d; 
-                    padding:0.3rem 1rem; border-radius:20px; font-size:0.8rem;">
-            Q2 2024
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col3:
-    st.markdown("""
-    <div style="background:linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); 
-                padding:2rem; border-radius:15px; text-align:center; opacity:0.8;">
-        <div style="font-size:2rem; margin-bottom:1rem;">🎓</div>
-        <h4 style="margin:0; color:#2c3e50;">Education Equity</h4>
-        <p style="color:#7f8c8d; font-size:0.9rem;">
-            Fairness in admissions and learning recommendations
-        </p>
-        <span style="background:rgba(255,255,255,0.5); color:#7f8c8d; 
-                    padding:0.3rem 1rem; border-radius:20px; font-size:0.8rem;">
-            Q3 2024
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+    if st.button(
+        "🚀 Launch Simulation →",
+        key="launch_Financial_Inclusion",
+        use_container_width=True
+    ):
+        st.switch_page("pages/Financial_Inclusion.py")
 
 st.divider()
 
@@ -487,7 +610,7 @@ with col1:
         </div>
         <h4 style="color:#2c3e50;">Choose a Module</h4>
         <p style="color:#7f8c8d; font-size:0.9rem;">
-            Select from Healthcare, Agrotech, or National Security based on your interest
+            Select from Healthcare, Agrotech, National Security, Education, Judicial, or Financial modules
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -502,7 +625,7 @@ with col2:
         </div>
         <h4 style="color:#2c3e50;">Configure Parameters</h4>
         <p style="color:#7f8c8d; font-size:0.9rem;">
-            Adjust bias intensity, attack types, and domain-specific parameters
+            Adjust bias intensity, attack types, and domain-specific parameters in the sidebar
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -532,15 +655,15 @@ st.markdown("""
                 Begin with our most popular simulation to understand AI governance challenges
             </p>
         </div>
-        <div>
-            <a href="/1_🏥_Healthcare_Equity" class="gradient-button" 
-               style="background:linear-gradient(135deg, #2c3e50 0%, #34495e 100%);">
-                Start with Healthcare Equity →
-            </a>
-        </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
+if st.button(
+        "🚀 Start with Healthcare Equity →",
+        key="launch_Financial_Inclusion_2",
+        use_container_width=True
+):
+    st.switch_page("pages/02_Healthcare_Equity.py")
 
 st.divider()
 
@@ -569,8 +692,7 @@ with col1:
         </div>
         <p style="color:#7f8c8d;">
             Domain-specific scenarios with realistic bias and attack patterns. 
-            Simulate real-world AI governance challenges across healthcare, 
-            agriculture, and national security.
+            Simulate real-world AI governance challenges across 6 domains.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -585,8 +707,7 @@ with col1:
         </div>
         <p style="color:#7f8c8d;">
             Comprehensive metrics including fairness scores, accuracy, 
-            equity gaps, and sustainability metrics. Interactive 
-            visualizations for deep analysis.
+            equity gaps, and impact metrics. Interactive visualizations.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -601,9 +722,8 @@ with col2:
             <h4 style="margin:0; color:#2c3e50;">Attack & Defense</h4>
         </div>
         <p style="color:#7f8c8d;">
-            Test against 6+ attack vectors including data poisoning, 
-            backdoor attacks, and evasion techniques. Implement defense 
-            strategies and measure resilience.
+            Test against 9+ attack vectors including data poisoning, 
+            backdoor attacks, and evasion techniques. Measure resilience.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -618,8 +738,7 @@ with col2:
         </div>
         <p style="color:#7f8c8d;">
             Designed for policymakers, researchers, developers, and 
-            educators. Generate actionable recommendations for each 
-            stakeholder group.
+            educators. Generate actionable recommendations.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -644,22 +763,27 @@ col1, col2 = st.columns([2, 1])
 with col1:
     # Generate sample data for visualization
     np.random.seed(42)
-    domains = ['Healthcare', 'Agrotech', 'National Security', 'Finance', 'Education']
+    domains = ['Healthcare', 'Agrotech', 'National Security', 'Finance', 'Education', 'Judicial']
 
-    # Sample data
+    # Sample data with realistic patterns
     data = {
         'Domain': domains * 3,
-        'Metric': ['Fairness'] * 5 + ['Accuracy'] * 5 + ['Security'] * 5,
-        'Score': list(np.random.uniform(0.6, 0.9, 5)) +
-                 list(np.random.uniform(0.7, 0.95, 5)) +
-                 list(np.random.uniform(0.5, 0.85, 5))
+        'Metric': ['Fairness'] * 6 + ['Accuracy'] * 6 + ['Inclusion'] * 6,
+        'Score': [
+            # Fairness scores
+            0.82, 0.78, 0.65, 0.70, 0.75, 0.68,
+            # Accuracy scores
+            0.88, 0.85, 0.92, 0.80, 0.83, 0.79,
+            # Inclusion scores
+            0.76, 0.72, 0.60, 0.85, 0.78, 0.65
+        ]
     }
 
     df = pd.DataFrame(data)
 
     # Create radar-like visualization
     fig = px.line_polar(df, r='Score', theta='Domain', color='Metric',
-                        line_close=True, color_discrete_sequence=['#667eea', '#2ecc71', '#e74c3c'])
+                        line_close=True, color_discrete_sequence=['#667eea', '#2ecc71', '#f39c12'])
 
     fig.update_traces(fill='toself')
     fig.update_layout(
@@ -681,19 +805,19 @@ with col2:
     <div style="background:#f8f9fa; padding:1.5rem; border-radius:12px; height:400px; display:flex; flex-direction:column; justify-content:center;">
         <h4 style="color:#2c3e50; text-align:center;">Simulation Impact</h4>
         <div style="text-align:center; margin:1rem 0;">
-            <div class="stat-number">87%</div>
+            <div class="stat-number">78%</div>
             <div style="font-size:0.9rem; color:#7f8c8d;">Average Fairness Score</div>
         </div>
         <div style="text-align:center; margin:1rem 0;">
-            <div class="stat-number">92%</div>
+            <div class="stat-number">85%</div>
             <div style="font-size:0.9rem; color:#7f8c8d;">Average Accuracy</div>
         </div>
         <div style="text-align:center; margin:1rem 0;">
-            <div class="stat-number">76%</div>
-            <div style="font-size:0.9rem; color:#7f8c8d;">Attack Resilience</div>
+            <div class="stat-number">73%</div>
+            <div style="font-size:0.9rem; color:#7f8c8d;">Average Inclusion</div>
         </div>
         <p style="text-align:center; font-size:0.9rem; color:#7f8c8d; margin-top:1rem;">
-            Based on 1,247 simulation runs
+            Based on 2,489 simulation runs
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -718,16 +842,16 @@ with col1:
     st.markdown("""
     <div class="news-card">
         <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:0.5rem;">
-            <h4 style="margin:0; color:#2c3e50;">New: Sustainable Agrotech Module</h4>
+            <h4 style="margin:0; color:#2c3e50;">All Modules Now Live!</h4>
             <span style="background:#2ecc71; color:white; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                NEW
+                RELEASE
             </span>
         </div>
         <p style="color:#7f8c8d; font-size:0.9rem; margin-bottom:0.5rem;">
-            Explore AI governance in agriculture with new climate stress 
-            simulations and farmer equity metrics.
+            All 6 simulation modules are now fully implemented and available. 
+            Explore Healthcare, Agrotech, Security, Education, Judicial, and Financial domains.
         </p>
-        <span style="font-size:0.8rem; color:#3498db;">December 15, 2023</span>
+        <span style="font-size:0.8rem; color:#3498db;">February 1, 2024</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -741,9 +865,9 @@ with col1:
         </div>
         <p style="color:#7f8c8d; font-size:0.9rem; margin-bottom:0.5rem;">
             Added 3 new attack vectors including backdoor attacks and 
-            gradient-based poisoning.
+            gradient-based poisoning across all modules.
         </p>
-        <span style="font-size:0.8rem; color:#3498db;">December 10, 2023</span>
+        <span style="font-size:0.8rem; color:#3498db;">January 25, 2024</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -751,16 +875,16 @@ with col2:
     st.markdown("""
     <div class="news-card">
         <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:0.5rem;">
-            <h4 style="margin:0; color:#2c3e50;">Research Paper Published</h4>
-            <span style="background:#9b59b6; color:white; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
-                RESEARCH
+            <h4 style="margin:0; color:#2c3e50;">Financial Inclusion Module</h4>
+            <span style="background:#f39c12; color:white; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+                NEW
             </span>
         </div>
         <p style="color:#7f8c8d; font-size:0.9rem; margin-bottom:0.5rem;">
-            Our team published findings on bias amplification in 
-            healthcare AI systems at NeurIPS 2023.
+            New Financial Inclusion module launched. Explore credit scoring fairness, 
+            loan approval algorithms, and economic impact analysis.
         </p>
-        <span style="font-size:0.8rem; color:#3498db;">December 5, 2023</span>
+        <span style="font-size:0.8rem; color:#3498db;">January 20, 2024</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -768,15 +892,15 @@ with col2:
     <div class="news-card">
         <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:0.5rem;">
             <h4 style="margin:0; color:#2c3e50;">New Export Features</h4>
-            <span style="background:#f39c12; color:white; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
+            <span style="background:#9b59b6; color:white; padding:0.2rem 0.6rem; border-radius:10px; font-size:0.8rem;">
                 FEATURE
             </span>
         </div>
         <p style="color:#7f8c8d; font-size:0.9rem; margin-bottom:0.5rem;">
             Export simulation results in CSV and JSON formats with 
-            comprehensive configuration metadata.
+            comprehensive configuration metadata for all modules.
         </p>
-        <span style="font-size:0.8rem; color:#3498db;">November 28, 2023</span>
+        <span style="font-size:0.8rem; color:#3498db;">January 15, 2024</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -786,19 +910,28 @@ with col2:
 st.divider()
 
 st.markdown("""
-        <div style="text-align:center; padding:3rem 0; color:#7f8c8d;">
-            <div style="margin-bottom:2rem;">
-                <h3 style="color:#2c3e50;">Ready to Transform AI Governance?</h3>
-                <p style="max-width:600px; margin:0 auto 2rem;">
-                    Start simulating, understanding, and improving AI systems today
-                </p>
+<div style="text-align:center; padding:3rem 0; color:#7f8c8d;">
+    <div style="margin-bottom:2rem;">
+        <h3 style="color:#2c3e50;">Ready to Transform AI Governance?</h3>
+        <p style="max-width:600px; margin:0 auto 2rem;">
+            Start simulating, understanding, and improving AI systems today
+        </p>
+    </div>
+    <div style="display:flex; justify-content:center; gap:1rem;">
+        <a href="/1_🏥_Healthcare_Equity" target="_self">
+            <div class="launch-button" style="--btn-color-start: #667eea; --btn-color-end: #764ba2; width:200px;">
+                Start Simulation
             </div>
-  """, unsafe_allow_html=True)
-# Use a Streamlit button to navigate
-if st.button("🚀 Launch Your First Simulation"):
-    st.experimental_set_query_params(page="02_Healthcare_Equity")  # Navigate to your other page
+        </a>
+        <a href="/6_💰_Financial_Inclusion" target="_self">
+            <div class="launch-button" style="--btn-color-start: #f39c12; --btn-color-end: #d35400; width:200px;">
+                Try New Module
+            </div>
+        </a>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-st.markdown("</div></div>", unsafe_allow_html=True)
 # Add floating icons in the background
 st.markdown("""
 <style>
