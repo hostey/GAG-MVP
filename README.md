@@ -32,4 +32,4 @@ An interactive simulation tool for exploring AI governance challenges in high-st
 ## Contributors
 - Thomas (Abuja, NG) – Lead Architect
 
-Built with ❤️ for global AI equity.
+Built with  for global AI equity.
