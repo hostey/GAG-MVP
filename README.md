@@ -7,6 +7,9 @@ An interactive simulation tool for exploring AI governance challenges in high-st
 - **Healthcare Equity**
 - **National Security Resilience**
 - **Sustainable Agrotech**
+- **Financial Inclusion**
+- **Education Equity**
+- **Judicial System**
 
 ## Features
 - Configurable simulations with Pydantic validation.
