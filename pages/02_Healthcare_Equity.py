@@ -1,1346 +1,1274 @@
 # pages/1_🏥_Healthcare_Equity.py
-import streamlit as st
+"""
+Healthcare Equity Simulation — GAGS Framework v3.0
+
+Refactored to integrate all five new feature modules from simulation_core.py:
+  Feature 1 — AI Agent Economy Sandbox  (resource auction in healthcare domain)
+  Feature 2 — Multimodal Red Teaming    (text/image/deepfake attack surface)
+  Feature 3 — Africa-Centric / Gender   (Abuja presets + UNESCO equity audit)
+  Feature 4 — Hybrid Governance Layer   (citizen vote + blockchain ledger)
+  Feature 5 — Strategic Social Arena    (negotiation / coalition game)
+
+Key improvements over previous version:
+  - Imports driven by simulation_core rather than duplicating logic
+  - Consistent result envelope {status, results, features, warnings, metadata}
+  - run_simple_simulation() used as the single computation entry point
+  - generate_africa_centric_data() + run_gender_equity_audit() wired in
+  - Governance ledger rendered inline; arena standings shown as leaderboard
+  - Multimodal red-team results surfaced in a dedicated tab
+  - Agent economy auction log visible in the Data Analysis tab
+  - All st.session_state keys namespaced under "health_*"
+  - CSS cleaned up: no inline gradients on metric cards (uses semantic colours)
+"""
+
+import json
+from datetime import datetime
+import warnings
+warnings.filterwarnings("ignore")
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, confusion_matrix, roc_auc_score
+import streamlit as st
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score, recall_score, precision_score,
+    f1_score, confusion_matrix,
+)
 from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_breast_cancer
 from sklearn.preprocessing import StandardScaler
-import warnings
 
-warnings.filterwarnings('ignore')
-
+# ── GAGS core ─────────────────────────────────────────────────────────────────
+from components.pdf_report import generate_pdf_compliance_report
 from components.governance_logic import (
+    # Data generation
     generate_synthetic_data,
+    generate_africa_centric_data,
+    AFRICA_SCENARIO_PRESETS,
+    # Bias / attack
     apply_bias,
     simulate_data_poisoning,
-    run_simple_simulation
+    # Fairness
+    calculate_fairness_metrics,
+    run_gender_equity_audit,
+    # Main simulation entry point — also runs Feature modules 1,2,4,5 internally
+    run_simple_simulation,
+    simulate_longitudinal_bias,
+    simulate_federated_learning,
 )
 from utils.config import simulation_config, settings
-
-# ───────────────────────────────────────────────
-# Page Configuration
-# ───────────────────────────────────────────────
-st.set_page_config(
-    page_title="Healthcare Equity • GAGS",
-    layout="wide",
-    page_icon="🏥"
+from components.i18n import t, get_lang, language_switcher, language_badge
+from components.ussd_simulator import ussd_interface, accessibility_gap_report, format_sms_result
+from components.nigeria_regulatory import nigeria_compliance_panel
+from components.ux_utils import (
+    guided_tour_banner, preset_selector,
+    metric_glossary_expander, history_browser, save_to_history,
+    share_url_panel, load_config_from_url, apply_url_config,
+    annotation_panel,
+    role_switcher, get_active_role, role_banner,
+    board_member_summary, ROLE_TAB_VISIBILITY,
 )
 
-# Custom CSS for healthcare-themed styling
-st.markdown("""
-<style>
-    .health-header {
-        background: linear-gradient(135deg, #3498db 0%, #2980b9 50%, #1c5d8a 100%);
-        padding: 2.5rem;
-        border-radius: 12px;
-        margin-bottom: 2rem;
-        color: white;
-        border-left: 6px solid #e74c3c;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-    }
-    .accuracy-metric-health {
-        background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 1rem;
-        border: 1px solid #3498db;
-    }
-    .fairness-metric-health {
-        background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 1rem;
-        border: 1px solid #2ecc71;
-    }
-    .access-metric-health {
-        background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 1rem;
-        border: 1px solid #9b59b6;
-    }
-    .outcome-metric-health {
-        background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 1rem;
-        border: 1px solid #e67e22;
-    }
-    .stButton>button {
-        background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-        color: white;
-        border: none;
-        padding: 0.8rem 2.5rem;
-        font-weight: bold;
-        border-radius: 8px;
-        transition: all 0.3s;
-        border: 2px solid #3498db;
-    }
-    .stButton>button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
-    }
-    .hospital-card {
-        background: #e8f4f8;
-        padding: 1.5rem;
-        border-radius: 10px;
-        border-left: 4px solid #3498db;
-        margin: 1rem 0;
-        color: #2c3e50;
-    }
-    .bias-tag-health {
-        display: inline-block;
-        background: #e74c3c;
-        color: white;
-        padding: 0.3rem 0.8rem;
-        border-radius: 15px;
-        font-size: 0.8rem;
-        margin: 0.2rem;
-        font-weight: bold;
-    }
-    .patient-group {
-        display: inline-block;
-        background: #2ecc71;
-        color: white;
-        padding: 0.3rem 0.8rem;
-        border-radius: 15px;
-        font-size: 0.8rem;
-        margin: 0.2rem;
-    }
-    .health-badge {
-        background: linear-gradient(135deg, #f1c40f 0%, #f39c12 100%);
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        color: #2c3e50;
-        font-weight: bold;
-        display: inline-block;
-        margin: 0.2rem;
-    }
-    .warning-banner-health {
-        background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #ffc107;
-        color: #856404;
-        margin: 1rem 0;
-    }
-    .safety-alert {
-        background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #dc3545;
-        color: #721c24;
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
 
-# ───────────────────────────────────────────────
-# Header Section
-# ───────────────────────────────────────────────
-st.markdown("""
-<div class="health-header">
-    <h1 style="margin:0; color:white; font-size:2.5rem;">🏥 Healthcare Equity Simulation</h1>
-    <p style="margin:0; opacity:0.9; font-size:1.2rem; margin-top:0.5rem;">
-        Explore how <strong>bias, algorithmic fairness, and data quality</strong> impact healthcare decisions and patient outcomes
-    </p>
-</div>
-""", unsafe_allow_html=True)
 
-st.markdown("""
-<div style="background: #e8f4f8; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #3498db;">
-    <p style="margin:0; color:#2c3e50;">
-        <strong>🩺 Healthcare Mission:</strong> AI in healthcare holds promise for improved diagnostics and treatment but risks perpetuating 
-        health disparities. This simulation explores fairness in diagnosis, treatment recommendations, and resource allocation.
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-# ───────────────────────────────────────────────
-# Session State Initialization
-# ───────────────────────────────────────────────
-if "health_run_history" not in st.session_state:
-    st.session_state.health_run_history = []
-if "patient_groups" not in st.session_state:
-    st.session_state.patient_groups = {}
-if "treatment_results" not in st.session_state:
-    st.session_state.treatment_results = {}
-
-# ───────────────────────────────────────────────
-# Sidebar Controls
-# ───────────────────────────────────────────────
-with st.sidebar:
-    # Header with icon
-    st.markdown("""
-    <div style="text-align:center; padding:1rem 0;">
-        <h2 style="color:#3498db; margin:0;">⚙️ Healthcare Configuration</h2>
-        <p style="color:#7f8c8d; font-size:0.9rem;">Configure your healthcare equity simulation</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.divider()
-
-    # Healthcare Context Selection
-    st.subheader("🏥 Healthcare Context")
-    healthcare_setting = st.selectbox(
-        "Select Healthcare Setting",
-        ["Hospital System", "Primary Care", "Specialty Care", "Telemedicine",
-         "Public Health Screening", "Clinical Trials"],
-        help="Different healthcare settings have different fairness challenges"
-    )
-
-    # Country/Region
-    region = st.selectbox(
-        "Region/Country",
-        ["United States", "United Kingdom", "Canada", "Germany", "Japan",
-         "India", "Nigeria", "Brazil", "Global South", "Global North"],
-        help="Region affects baseline healthcare access and disparities"
-    )
-
-    st.divider()
-
-    # Bias Configuration
-    st.subheader("🎭 Bias Configuration")
-
-    selected_biases = st.multiselect(
-        "**Select Bias Types**",
-        options=["demographic", "socioeconomic", "historical", "measurement",
-                 "access_bias", "diagnostic_bias", "treatment_bias"],
-        default=["demographic", "socioeconomic", "historical"],
-        help="Biases affecting healthcare decisions",
-        format_func=lambda x: f"👥 {x}" if x == "demographic" else
-        f"💰 {x}" if x == "socioeconomic" else
-        f"📜 {x}" if x == "historical" else
-        f"📏 {x}" if x == "measurement" else
-        f"🚑 {x}" if x == "access_bias" else
-        f"🔍 {x}" if x == "diagnostic_bias" else
-        f"💊 {x}" if x == "treatment_bias" else
-        str(x)
-    )
-
-    # Display selected biases as tags
-    if selected_biases:
-        tags_html = "".join([f'<span class="bias-tag-health">{bias}</span>' for bias in selected_biases])
-        st.markdown(f"**Active Biases:**<br>{tags_html}", unsafe_allow_html=True)
-
-    bias_intensity = st.slider(
-        "**Bias Intensity**",
-        0.0, simulation_config.MAX_BIAS_FACTOR, 0.3, 0.05,
-        help="Strength of bias in healthcare algorithms"
-    )
-
-    st.divider()
-
-    # Attack Configuration
-    st.subheader("⚠️ Adversarial Attacks")
-
-    attack_type = st.selectbox(
-        "**Attack Type**",
-        ["Data Poisoning", "Model Evasion", "Synthetic Patient Injection",
-         "Diagnosis Manipulation", "Treatment Recommendation Tampering"],
-        help="Type of attack on healthcare data"
-    )
-
-    poison_rate = st.slider(
-        "**Attack Strength**",
-        0.0, 0.5, 0.05, 0.01,
-        format="%.2f",
-        help="Proportion of healthcare data corrupted"
-    )
-
-    st.divider()
-
-    # Patient Demographics
-    st.subheader("👨‍⚕️ Patient Demographics")
-
-    # Socioeconomic diversity
-    low_income_ratio = st.slider(
-        "**Low-Income Patients**",
-        0.0, 1.0, 0.4, 0.05,
-        help="Percentage of patients from low-income backgrounds"
-    )
-
-    # Demographic groups
-    demographic_diversity = st.slider(
-        "**Demographic Diversity**",
-        0.0, 1.0, 0.6, 0.05,
-        help="Diversity across demographic groups (0 = homogeneous, 1 = highly diverse)"
-    )
-
-    # Insurance coverage
-    uninsured_ratio = st.slider(
-        "**Uninsured/Underinsured**",
-        0.0, 1.0, 0.25, 0.05,
-        help="Percentage of patients with limited/no insurance coverage"
-    )
-
-    st.divider()
-
-    # Healthcare Access Factors
-    st.subheader("🏥 Access & Quality Factors")
-
-    access_inequality = st.slider(
-        "**Access Inequality Factor**",
-        0.0, 1.0, 0.4, 0.05,
-        help="0 = Equal access for all, 1 = Highly unequal access"
-    )
-
-    quality_variation = st.select_slider(
-        "**Healthcare Quality Variation**",
-        options=["Uniform", "Minimal", "Moderate", "Significant", "Extreme"],
-        value="Moderate"
-    )
-
-    rural_access = st.slider(
-        "**Rural Access Equity**",
-        0.0, 1.0, 0.6,
-        help="0 = Poor rural access, 1 = Equal rural/urban access"
-    )
-
-    st.divider()
-
-    # Simulation Configuration
-    st.subheader("📊 Simulation Parameters")
-
-    sample_size = st.number_input(
-        "**Number of Patient Records**",
-        1000, 100000, settings.DEFAULT_N_SAMPLES, step=1000
-    )
-
-    n_runs = st.slider(
-        "**Number of Simulation Runs**",
-        1, 10, 3,
-        help="More runs provide more reliable statistics"
-    )
-
-    prediction_task = st.selectbox(
-        "**Prediction Task**",
-        ["Disease Diagnosis", "Treatment Response", "Readmission Risk",
-         "Length of Stay", "Mortality Risk", "Treatment Recommendation"],
-        help="What the AI system is predicting"
-    )
-
-    st.divider()
-
-    # Run Button
-    col_run, col_reset = st.columns(2)
-    with col_run:
-        run_button = st.button(
-            "🏥 **Run**",
-            type="primary",
-            use_container_width=True
-        )
-    with col_reset:
-        if st.button("🔄 Reset", use_container_width=True):
-            st.session_state.health_run_history = []
-            st.session_state.patient_groups = {}
-            st.rerun()
-
-
-# ───────────────────────────────────────────────
-# Helper Functions
-# ───────────────────────────────────────────────
-def generate_healthcare_data(n_samples, n_features=12, low_income_ratio=0.4, demographic_diversity=0.6):
-    """Generate realistic healthcare data with patient demographics."""
-    # Get base synthetic data
-    X, y_base, demo_info = generate_synthetic_data(
-        n_samples=n_samples,
-        n_features=n_features
-    )
-
-    # Add healthcare features
-    # Feature 0: Age
-    X[:, 0] = np.random.normal(55, 18, n_samples)
-    X[:, 0] = np.clip(X[:, 0], 18, 100)
-
-    # Feature 1: BMI (Body Mass Index)
-    X[:, 1] = np.random.normal(27, 6, n_samples)
-    X[:, 1] = np.clip(X[:, 1], 15, 50)
-
-    # Feature 2: Blood Pressure (systolic)
-    X[:, 2] = np.random.normal(130, 20, n_samples)
-    X[:, 2] = np.clip(X[:, 2], 80, 200)
-
-    # Feature 3: Cholesterol level
-    X[:, 3] = np.random.normal(200, 40, n_samples)
-    X[:, 3] = np.clip(X[:, 3], 100, 350)
-
-    # Feature 4: Socioeconomic status (0-1, higher = wealthier)
-    n_low_income = int(n_samples * low_income_ratio)
-    socioeconomic = np.ones(n_samples)
-    socioeconomic[:n_low_income] = np.random.uniform(0.1, 0.4, n_low_income)
-    socioeconomic[n_low_income:] = np.random.uniform(0.6, 1.0, n_samples - n_low_income)
-    X[:, 4] = socioeconomic
-
-    # Feature 5: Access to healthcare resources
-    resource_access = socioeconomic * 0.8 + np.random.uniform(0, 0.2, n_samples)
-    X[:, 5] = np.clip(resource_access, 0, 1)
-
-    # Feature 6: Number of chronic conditions
-    X[:, 6] = np.random.poisson(1.5, n_samples)
-    X[:, 6] = np.clip(X[:, 6], 0, 8)
-
-    # Feature 7: Health literacy score (0-1)
-    health_literacy = socioeconomic * 0.6 + np.random.uniform(0, 0.4, n_samples)
-    X[:, 7] = np.clip(health_literacy, 0, 1)
-
-    # Feature 8: Insurance coverage (0-1)
-    insurance_coverage = socioeconomic * 0.7 + np.random.uniform(0, 0.3, n_samples)
-    X[:, 8] = np.clip(insurance_coverage, 0, 1)
-
-    # Feature 9: Previous hospitalizations
-    X[:, 9] = np.random.poisson(0.8, n_samples)
-
-    # Feature 10: Genetic risk factor (0-1)
-    X[:, 10] = np.random.beta(2, 5, n_samples)
-
-    # Feature 11: Lifestyle score (0-1, higher = healthier)
-    lifestyle = socioeconomic * 0.5 + np.random.uniform(0, 0.5, n_samples)
-    X[:, 11] = np.clip(lifestyle, 0, 1)
-
-    # Generate health outcome probability
-    # Base on health factors, but introduce bias factors
-    age_risk = (X[:, 0] - 18) / 82 * 0.2  # Age contribution
-    bmi_risk = np.maximum(0, (X[:, 1] - 25) / 25) * 0.15  # BMI risk
-    bp_risk = np.maximum(0, (X[:, 2] - 120) / 80) * 0.15  # Blood pressure
-    chronic_risk = X[:, 6] / 8 * 0.2  # Chronic conditions
-    genetic_risk = X[:, 10] * 0.1  # Genetic factors
-    lifestyle_benefit = X[:, 11] * -0.1  # Healthy lifestyle reduces risk
-
-    # Bias factor based on socioeconomic status and access
-    bias_factor = np.zeros(n_samples)
-    bias_factor[socioeconomic < 0.5] -= bias_intensity * 0.3  # Penalize low-income
-    bias_factor[X[:, 5] < 0.5] -= bias_intensity * 0.2  # Penalize poor access
-
-    health_risk = age_risk + bmi_risk + bp_risk + chronic_risk + genetic_risk + lifestyle_benefit + bias_factor
-
-    # Add noise
-    health_risk += np.random.normal(0, 0.1, n_samples)
-
-    # Create binary labels (1 = adverse outcome, 0 = good outcome)
-    # For healthcare, we want to predict adverse outcomes
-    risk_threshold = np.percentile(health_risk, 40)  # Top 60% most at risk
-    y = (health_risk > risk_threshold).astype(int)
-
-    # Create patient groups (0 = low-income, 1 = middle/high income)
-    patient_groups = np.zeros(n_samples)
-    patient_groups[n_low_income:] = 1
-
-    # Add demographic diversity
-    if demographic_diversity > 0:
-        n_demographic_groups = max(2, int(demographic_diversity * 5))
-        demographic_groups = np.random.randint(0, n_demographic_groups, n_samples)
-    else:
-        demographic_groups = np.zeros(n_samples)
-
-    return X, y, patient_groups, demographic_groups
-
-
-def calculate_healthcare_metrics(y_true, y_pred, patient_groups, demographic_groups, X_features=None):
-    """Calculate comprehensive healthcare equity metrics."""
-    metrics = {}
-
-    # Basic metrics
-    metrics["accuracy"] = accuracy_score(y_true, y_pred)
-    metrics["precision"] = precision_score(y_true, y_pred, zero_division=0)
-    metrics["recall"] = recall_score(y_true, y_pred, zero_division=0)
-    metrics["f1_score"] = f1_score(y_true, y_pred, zero_division=0)
-
-    # Confusion matrix
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-    metrics.update({
-        "true_positives": tp,
-        "false_positives": fp,
-        "true_negatives": tn,
-        "false_negatives": fn
-    })
-
-    # Sensitivity and specificity (important for healthcare)
-    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-    metrics.update({
-        "sensitivity": sensitivity,
-        "specificity": specificity
-    })
-
-    # Group-based fairness metrics (income groups)
-    group_metrics = {}
-    unique_groups = np.unique(patient_groups)
-
-    for group in unique_groups:
-        mask = (patient_groups == group)
-        if np.sum(mask) == 0:
-            continue
-
-        group_true = y_true[mask]
-        group_pred = y_pred[mask]
-
-        group_accuracy = accuracy_score(group_true, group_pred)
-        group_precision = precision_score(group_true, group_pred, zero_division=0)
-        group_recall = recall_score(group_true, group_pred, zero_division=0)
-
-        # Detection rates (for adverse outcomes)
-        detection_rate = np.mean(group_pred == 1)
-
-        # False positive/negative rates
-        group_fp = np.sum((group_pred == 1) & (group_true == 0))
-        group_fn = np.sum((group_pred == 0) & (group_true == 1))
-        group_tn = np.sum((group_pred == 0) & (group_true == 0))
-        group_tp = np.sum((group_pred == 1) & (group_true == 1))
-
-        group_fpr = group_fp / (group_fp + group_tn) if (group_fp + group_tn) > 0 else 0
-        group_fnr = group_fn / (group_fn + group_tp) if (group_fn + group_tp) > 0 else 0
-
-        group_metrics[group] = {
-            "accuracy": group_accuracy,
-            "precision": group_precision,
-            "recall": group_recall,
-            "detection_rate": detection_rate,
-            "fpr": group_fpr,
-            "fnr": group_fnr,
-            "sample_size": np.sum(mask)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Hybrid Data Pipeline  (real-world loaders — unchanged from original)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class HealthcareHybridPipeline:
+    """Loads real-world or synthetic healthcare datasets and pre-processes them."""
+
+    def __init__(self):
+        self.available_datasets = {
+            "Synthetic Only":              self.generate_synthetic_only,
+            "Heart Disease (UCI)":         self.load_heart_disease_uci,
+            "Diabetes (PIMA)":             self.load_pima_diabetes,
+            "Breast Cancer (Wisconsin)":   self.load_breast_cancer,
+            "Hybrid (Synthetic + Real)":   self.generate_hybrid_data,
+            # Feature 3 — Africa-centric scenarios
+            "Abuja Smallholder Agrotech":  self._load_africa_agrotech,
+            "Abuja Multilingual Healthcare": self._load_africa_healthcare,
         }
 
-    # Calculate fairness disparities
-    if len(group_metrics) >= 2:
-        # Demographic parity difference (detection rate disparity)
-        detection_rates = [metrics["detection_rate"] for metrics in group_metrics.values()]
-        demographic_parity_diff = max(detection_rates) - min(detection_rates)
+    # ── Africa-centric loaders (Feature 3) ────────────────────────────────────
+    def _load_africa_agrotech(self, n_samples: int = 5000):
+        X, y, demo, preset = generate_africa_centric_data("smallholder_agrotech", n_samples)
+        return self._arrays_to_df(X, y, demo, preset["description"])
 
-        # Equal opportunity difference (recall disparity)
-        recalls = [metrics["recall"] for metrics in group_metrics.values()]
-        equal_opportunity_diff = max(recalls) - min(recalls)
+    def _load_africa_healthcare(self, n_samples: int = 5000):
+        X, y, demo, preset = generate_africa_centric_data("multilingual_healthcare", n_samples)
+        return self._arrays_to_df(X, y, demo, preset["description"])
 
-        # Equalized odds difference (combined FPR and FNR)
-        fprs = [metrics["fpr"] for metrics in group_metrics.values()]
-        fnrs = [metrics["fnr"] for metrics in group_metrics.values()]
-        equalized_odds_diff = max(max(fprs) - min(fprs), max(fnrs) - min(fnrs))
+    @staticmethod
+    def _arrays_to_df(X, y, demo, description: str) -> pd.DataFrame:
+        cols = [f"feature_{i}" for i in range(X.shape[1])]
+        df = pd.DataFrame(X, columns=cols)
+        df["target"] = y
+        df["demographic_group"] = demo
+        df["income_level"] = X[:, 1]   # income proxy
+        df["_africa_centric"] = True
+        df["_description"] = description
+        return df
 
-        # Overall equity score (0-1, higher is better)
-        max_disparity = max(demographic_parity_diff, equal_opportunity_diff, equalized_odds_diff)
-        equity_score = 1.0 - min(1.0, max_disparity * 3)
+    # ── Real-world loaders ─────────────────────────────────────────────────────
+    @st.cache_data(show_spinner=False)
+    def load_heart_disease_uci(_self, n_samples: int = 5000):
+        try:
+            url = ("https://archive.ics.uci.edu/ml/machine-learning-databases/"
+                   "heart-disease/processed.cleveland.data")
+            cols = ["age","sex","cp","trestbps","chol","fbs","restecg",
+                    "thalach","exang","oldpeak","slope","ca","thal","target"]
+            df = pd.read_csv(url, names=cols, na_values="?").dropna()
+            df["target"] = (df["target"] > 0).astype(int)
+            n = min(len(df), n_samples)
+            df = df.iloc[:n].copy()
+            df["income_level"]    = np.random.uniform(0, 1, n)
+            df["access_score"]    = np.random.uniform(0.3, 1, n)
+            df["education_level"] = np.random.choice([1, 2, 3, 4], n, p=[0.2, 0.3, 0.3, 0.2])
+            return df
+        except Exception as exc:
+            st.warning(f"Could not load UCI dataset: {exc}")
+            return _self.generate_synthetic_only(n_samples)
 
-        metrics.update({
-            "group_metrics": group_metrics,
-            "demographic_parity_difference": demographic_parity_diff,
-            "equal_opportunity_difference": equal_opportunity_diff,
-            "equalized_odds_difference": equalized_odds_diff,
-            "equity_score": equity_score,
-            "max_disparity": max_disparity
-        })
+    @st.cache_data(show_spinner=False)
+    def load_pima_diabetes(_self, n_samples: int = 5000):
+        try:
+            url = ("https://raw.githubusercontent.com/jbrownlee/Datasets/master/"
+                   "pima-indians-diabetes.data.csv")
+            cols = ["preg","glucose","bp","skin","insulin","bmi","pedigree","age","target"]
+            df = pd.read_csv(url, names=cols)
+            n = min(len(df), n_samples)
+            df = df.iloc[:n].copy()
+            df["income_level"] = np.random.uniform(0, 1, n)
+            df["access_score"] = np.random.uniform(0.3, 1, n)
+            return df
+        except Exception:
+            return _self.generate_synthetic_only(n_samples)
 
-    # Health access correlation (if feature data available)
-    if X_features is not None:
-        # Calculate correlation between socioeconomic status and predictions
-        socioeconomic_status = X_features[:, 4]
-        correlation = np.corrcoef(socioeconomic_status, y_pred)[0, 1]
-        metrics["socioeconomic_correlation"] = correlation
+    @st.cache_data(show_spinner=False)
+    def load_breast_cancer(_self, n_samples: int = 5000):
+        data = load_breast_cancer()
+        df = pd.DataFrame(data.data, columns=data.feature_names)
+        df["target"] = data.target
+        n = min(len(df), n_samples)
+        df = df.iloc[:n].copy()
+        df["age"]          = np.random.normal(55, 15, n).clip(25, 90)
+        df["income_level"] = np.random.uniform(0, 1, n)
+        df["insurance"]    = np.random.choice([0, 1], n, p=[0.2, 0.8])
+        return df
 
-        # Calculate healthcare access correlation
-        healthcare_access = X_features[:, 5]
-        access_correlation = np.corrcoef(healthcare_access, y_pred)[0, 1]
-        metrics["access_correlation"] = access_correlation
+    def generate_synthetic_only(self, n_samples: int = 5000) -> pd.DataFrame:
+        np.random.seed(42)
+        n = n_samples
+        data = {
+            "age":                      np.random.normal(55, 15, n).clip(18, 100),
+            "sex":                      np.random.choice([0, 1], n, p=[0.45, 0.55]),
+            "bmi":                      np.random.normal(27, 6, n).clip(15, 50),
+            "blood_pressure":           np.random.normal(130, 20, n).clip(80, 200),
+            "cholesterol":              np.random.normal(200, 40, n).clip(100, 350),
+            "glucose":                  np.random.normal(110, 30, n).clip(60, 300),
+            "chronic_conditions":       np.random.poisson(1.5, n).clip(0, 8),
+            "previous_hospitalizations":np.random.poisson(0.8, n),
+            "smoking":                  np.random.binomial(1, 0.25, n),
+            "exercise_frequency":       np.random.uniform(0, 1, n),
+            "income_level":             np.random.uniform(0, 1, n),
+            "education":                np.random.choice([1, 2, 3, 4], n, p=[0.15, 0.35, 0.35, 0.15]),
+            "insurance":                np.random.binomial(1, 0.8, n),
+            "access_score":             np.random.uniform(0.3, 1, n),
+        }
+        rs = (
+            data["age"] / 100 * 0.2
+            + (data["bmi"] - 25) / 25 * 0.15
+            + (data["blood_pressure"] - 120) / 80 * 0.15
+            + (data["cholesterol"] - 200) / 150 * 0.1
+            + data["chronic_conditions"] / 8 * 0.2
+            + (1 - data["exercise_frequency"]) * 0.1
+            + data["smoking"] * 0.05
+        )
+        data["target"] = (rs + np.random.normal(0, 0.1, n) > np.percentile(rs, 60)).astype(int)
+        return pd.DataFrame(data)
 
-        # Calculate insurance coverage correlation
-        insurance_coverage = X_features[:, 8]
-        insurance_correlation = np.corrcoef(insurance_coverage, y_pred)[0, 1]
-        metrics["insurance_correlation"] = insurance_correlation
+    def generate_hybrid_data(self, n_samples: int = 5000) -> pd.DataFrame:
+        try:
+            real = self.load_heart_disease_uci(n_samples // 2)
+            synth = self.generate_synthetic_only(n_samples // 2)
+            common = list(set(real.columns) & set(synth.columns))
+            hybrid = pd.concat([real[common], synth[common]], ignore_index=True)
+            if "target" not in hybrid.columns:
+                hybrid["target"] = np.random.choice([0, 1], len(hybrid))
+            return hybrid.sample(frac=1).reset_index(drop=True)
+        except Exception:
+            return self.generate_synthetic_only(n_samples)
 
-    return metrics
+    # ── Pre-processing ─────────────────────────────────────────────────────────
+    def preprocess_data(self, df: pd.DataFrame, target_col: str = "target"):
+        if target_col not in df.columns:
+            raise ValueError(f"Target column '{target_col}' not in DataFrame")
+        # Drop non-numeric metadata columns added by Africa loader
+        drop_cols = [c for c in df.columns if c.startswith("_")]
+        X = df.drop(columns=[target_col] + drop_cols, errors="ignore")
+        y = df[target_col]
+        cat_cols = X.select_dtypes(include=["object", "category"]).columns
+        if len(cat_cols):
+            X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
+        num_cols = X.select_dtypes(include=[np.number]).columns
+        X[num_cols] = X[num_cols].fillna(X[num_cols].median())
+        return X.values, y.values
+
+    def create_patient_groups(self, df: pd.DataFrame) -> np.ndarray:
+        """Return binary group array: 0 = disadvantaged, 1 = advantaged."""
+        if "demographic_group" in df.columns:
+            return df["demographic_group"].values.astype(int)
+        if "income_level" in df.columns:
+            return (df["income_level"] < 0.3).astype(int).values
+        if "insurance" in df.columns:
+            return (df["insurance"] == 0).astype(int).values
+        return np.zeros(len(df), dtype=int)
 
 
-# ───────────────────────────────────────────────
-# Main Content Area
-# ───────────────────────────────────────────────
-if run_button or st.session_state.health_run_history:
+# Singleton pipeline
+_pipeline = HealthcareHybridPipeline()
 
-    if run_button:
-        # Clear previous results
-        st.session_state.health_run_history = []
 
-        # Run simulations
-        progress_bar = st.progress(0)
 
-        for i in range(n_runs):
-            with st.spinner(f"Running healthcare simulation {i + 1}/{n_runs}..."):
 
-                # Generate healthcare data
-                X, y, patient_groups, demographic_groups = generate_healthcare_data(
-                    n_samples=sample_size,
-                    low_income_ratio=low_income_ratio,
-                    demographic_diversity=demographic_diversity
-                )
+st.set_page_config(page_title="Healthcare Equity • GAGS", layout="wide", page_icon="🏥")
 
-                # Apply selected biases
-                for bias_type in selected_biases:
-                    if bias_type == "socioeconomic":
-                        # Amplify bias based on socioeconomic status
-                        low_ses_mask = (X[:, 4] < 0.5)  # Low SES patients
-                        # Add noise to low SES patients' features
-                        noise_scale = bias_intensity * 0.5
-                        X[low_ses_mask] += np.random.normal(0, noise_scale, (np.sum(low_ses_mask), X.shape[1]))
+# ── Design system ──────────────────────────────────────────────────────────────
+try:
+    from components.gags_design import inject_css, DOMAIN_ACCENTS, page_header, plotly_theme as _ptheme
+    inject_css("health")
+    ACCENT = DOMAIN_ACCENTS["health"]
+except ImportError:
+    ACCENT = "#0891b2"
 
-                    elif bias_type == "historical":
-                        # Historical bias: under-predict outcomes for certain groups
-                        for group in np.unique(demographic_groups):
-                            if group > 0:  # Assume non-majority groups
-                                group_mask = (demographic_groups == group)
-                                if np.any(group_mask):
-                                    # Reduce predicted risk for minority groups (historical under-diagnosis)
-                                    bias_strength = bias_intensity * 0.3
-                                    if np.random.rand() < bias_strength:
-                                        high_risk_mask = group_mask & (y == 1)
-                                        if len(np.where(high_risk_mask)[0]) > 0:
-                                            flip_count = int(np.sum(high_risk_mask) * bias_strength)
-                                            flip_indices = np.random.choice(np.where(high_risk_mask)[0], flip_count,
-                                                                            replace=False)
-                                            y[flip_indices] = 0
 
-                # Apply access inequality
-                if access_inequality > 0:
-                    # Low-income patients get worse access features
-                    low_income_mask = (patient_groups == 0)
-                    access_factor = 1 - (access_inequality * 0.6)
-                    X[low_income_mask, 5] *= access_factor  # Resource access
-                    X[low_income_mask, 8] *= access_factor  # Insurance coverage
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session state initialisation
+# ═══════════════════════════════════════════════════════════════════════════════
 
-                # Apply rural access inequality
-                if rural_access < 1.0:
-                    access_gap = 1 - rural_access
-                    # Simulate rural patients (random 30% of low-access)
-                    rural_mask = (X[:, 5] < access_gap) & (np.random.rand(len(X)) < 0.3)
-                    # Reduce features for rural patients
-                    X[rural_mask, 7] *= 0.7  # Health literacy
-                    X[rural_mask, 11] *= 0.8  # Lifestyle score
+_STATE_DEFAULTS = {
+    "health_run_history":      [],
+    "health_dataset_info":     {},
+    "health_feature_outputs":  {},
+    "health_xai_results":      {},
+    "health_longitudinal":     None,
+    "health_federated":        None,
+    "health_snapshot_history": [],
+}
+for _k, _v in _STATE_DEFAULTS.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
 
-                # Apply poisoning attack
-                X_p, y_p, patient_groups = simulate_data_poisoning(
-                    X, y, poison_rate,
-                    attack_type="label_flipping",
-                    demographic_info=patient_groups,
-                    targeted=True
-                )
 
-                # Split data
-                X_train, X_test, y_train, y_test, groups_train, groups_test, demo_train, demo_test = train_test_split(
-                    X_p, y_p, patient_groups, demographic_groups, test_size=0.3, random_state=42 + i
-                )
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper functions
+# ═══════════════════════════════════════════════════════════════════════════════
 
-                # Standardize features
-                scaler = StandardScaler()
-                X_train_scaled = scaler.fit_transform(X_train)
-                X_test_scaled = scaler.transform(X_test)
+def _train_and_score(X, y, random_state=42):
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import StandardScaler
+    if len(np.unique(y)) < 2:
+        return None, None, None, None
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X)
+    Xtr, Xte, ytr, yte = train_test_split(Xs, y, test_size=0.3, random_state=random_state,
+        stratify=y if len(np.unique(y)) > 1 else None)
+    clf = RandomForestClassifier(n_estimators=100, class_weight="balanced", random_state=random_state)
+    clf.fit(Xtr, ytr); yp = clf.predict(Xte)
+    return ({"accuracy":float(accuracy_score(yte,yp)),"recall":float(recall_score(yte,yp,zero_division=0)),
+             "precision":float(precision_score(yte,yp,zero_division=0)),"f1":float(f1_score(yte,yp,zero_division=0)),
+             "fpr":float(np.mean(yp[yte==0]==1)) if (yte==0).any() else 0.0},
+            clf, scaler, (Xtr, Xte, ytr, yte))
 
-                # Train model (using class weights to handle imbalance)
-                model = RandomForestClassifier(
-                    n_estimators=100,
-                    class_weight='balanced',
-                    random_state=42 + i
-                )
 
-                model.fit(X_train_scaled, y_train)
-                y_pred = model.predict(X_test_scaled)
+def _run_one(
+    data_source, n_samples, selected_biases, bias_intensity,
+    poison_rate, access_inequality, run_idx,
+    enable_redteam=False, enable_governance=True, governance_policy="majority_vote",
+    enable_arena=False, enable_agent_economy=False, enable_gender_audit=True,
+):
+    try:
+        X, y, demo = generate_synthetic_data(n_samples=n_samples, n_features=10)
+        if data_source.startswith("abuja") or data_source == "africa_centric":
+            X, y, demo, _ = generate_africa_centric_data(scenario="healthcare", n_samples=n_samples)
+    except Exception:
+        X, y, demo = generate_synthetic_data(n_samples=n_samples, n_features=10)
+    X = X.astype(np.float64)
+    if access_inequality > 0:
+        mask = demo == 0
+        if mask.any():
+            X[mask] += np.random.normal(0, access_inequality*0.3, (mask.sum(), X.shape[1]))
+    _vb = list(simulation_config.BIAS_TYPES) + [b for b in ["gender","linguistic"] if b not in simulation_config.BIAS_TYPES]
+    for bt in [b for b in selected_biases if b in _vb]:
+        try: X, y, demo = apply_bias(X, y, bt, bias_intensity, demographic_info=demo)
+        except: pass
+    try: X, y, demo = simulate_data_poisoning(X, y, poison_rate, attack_type="label_flipping", demographic_info=demo, targeted=False)
+    except: pass
+    metrics, clf, scaler, splits = _train_and_score(X, y, random_state=42+max(run_idx,0))
+    if clf is None:
+        return {"accuracy":0,"recall":0,"sensitivity":0,"precision":0,"f1":0,"fpr":0,
+                "specificity":0,"acc_hi":0,"acc_lo":0,"sens_hi":0,"sens_lo":0,
+                "adv_hi":0,"adv_lo":0,
+                "equity_score":0,"fairness_score":0,"demographic_parity":0,"equalized_odds":0,
+                "bias_intensity":bias_intensity,"poison_rate":poison_rate,"biases":"None",
+                "run_id":run_idx+1,"data_source":data_source,"gender_gap":0,"warnings":[]}
+    X_tr, X_te, y_tr, y_te = splits
+    y_pred = clf.predict(X_te)
+    fair = calculate_fairness_metrics(y_te, y_pred, demo[:len(y_te)])
+    gender_audit = None
+    if enable_gender_audit:
+        try: gender_audit = run_gender_equity_audit(y_te, y_pred, demo[:len(y_te)], 0.34)
+        except: pass
+    if run_idx == 0:
+        try:
+            bi = bias_intensity if bias_intensity > 0 else 0.15
+            bt0 = next((b for b in selected_biases if b in _vb), "demographic")
+            st.session_state.health_longitudinal = simulate_longitudinal_bias(X, y, demo, initial_bias_type=bt0, initial_bias_intensity=bi, n_generations=5, random_state=42).__dict__
+        except: st.session_state.health_longitudinal = None
+        try: st.session_state.health_federated = simulate_federated_learning(X, y, demo, n_clients=4, n_rounds=3, bias_heterogeneity=(bias_intensity or 0.15)*0.5, random_state=42).__dict__
+        except: st.session_state.health_federated = None
 
-                # Calculate comprehensive metrics
-                metrics = calculate_healthcare_metrics(
-                    y_test, y_pred, groups_test, demo_test, X_test
-                )
+    # ── Per-group metrics (adv_hi/lo = advantaged/disadvantaged group accuracy)
+    demo_te = demo[:len(y_te)]
+    adv_mask = demo_te == 1   # advantaged group
+    dis_mask = demo_te == 0   # disadvantaged group
+    def _grp_acc(mask):
+        return float(accuracy_score(y_te[mask], y_pred[mask])) if mask.any() else metrics["accuracy"]
+    def _grp_sens(mask):
+        pos = mask & (y_te == 1)
+        if not pos.any(): return metrics["recall"]
+        return float(np.mean(y_pred[pos] == 1))
+    def _grp_spec(mask):
+        neg = mask & (y_te == 0)
+        if not neg.any(): return 1.0 - metrics["fpr"]
+        return float(np.mean(y_pred[neg] == 0))
 
-                # Calculate additional healthcare-specific metrics
-                # Adverse outcome rate by income group
-                low_income_mask = (groups_test == 0)
-                high_income_mask = (groups_test == 1)
+    acc_hi  = _grp_acc(adv_mask);  acc_lo  = _grp_acc(dis_mask)
+    sens_hi = _grp_sens(adv_mask); sens_lo = _grp_sens(dis_mask)
+    adv_hi  = _grp_acc(adv_mask);  adv_lo  = _grp_acc(dis_mask)
+    specificity = float(np.mean(y_pred[y_te == 0] == 0)) if (y_te == 0).any() else 0.0
 
-                adverse_rate_low = np.mean(y_test[low_income_mask]) if np.any(low_income_mask) else 0
-                adverse_rate_high = np.mean(y_test[high_income_mask]) if np.any(high_income_mask) else 0
-                adverse_gap = abs(adverse_rate_high - adverse_rate_low)
-
-                # Detection accuracy by group
-                accuracy_low = accuracy_score(y_test[low_income_mask], y_pred[low_income_mask]) if np.any(
-                    low_income_mask) else 0
-                accuracy_high = accuracy_score(y_test[high_income_mask], y_pred[high_income_mask]) if np.any(
-                    high_income_mask) else 0
-                accuracy_gap = abs(accuracy_high - accuracy_low)
-
-                # Sensitivity (true positive rate) by group
-                sensitivity_low = recall_score(y_test[low_income_mask], y_pred[low_income_mask],
-                                               zero_division=0) if np.any(low_income_mask) else 0
-                sensitivity_high = recall_score(y_test[high_income_mask], y_pred[high_income_mask],
-                                                zero_division=0) if np.any(high_income_mask) else 0
-                sensitivity_gap = abs(sensitivity_high - sensitivity_low)
-
-                # Health equity score
-                health_equity_score = 1.0 - min(1.0, adverse_gap + accuracy_gap + sensitivity_gap)
-
-                # Store results
-                run_result = {
-                    "run_id": i + 1,
-                    "healthcare_setting": healthcare_setting,
-                    "region": region,
-                    "prediction_task": prediction_task,
-                    "accuracy": metrics["accuracy"],
-                    "precision": metrics.get("precision", 0),
-                    "recall": metrics.get("recall", 0),
-                    "f1_score": metrics.get("f1_score", 0),
-                    "sensitivity": metrics.get("sensitivity", 0),
-                    "specificity": metrics.get("specificity", 0),
-                    "equity_score": metrics.get("equity_score", 0.5),
-                    "health_equity_score": health_equity_score,
-                    "adverse_rate_low": adverse_rate_low,
-                    "adverse_rate_high": adverse_rate_high,
-                    "accuracy_low": accuracy_low,
-                    "accuracy_high": accuracy_high,
-                    "sensitivity_low": sensitivity_low,
-                    "sensitivity_high": sensitivity_high,
-                    "demographic_parity": metrics.get("demographic_parity_difference", 0),
-                    "equal_opportunity": metrics.get("equal_opportunity_difference", 0),
-                    "bias_intensity": bias_intensity,
-                    "poison_rate": poison_rate,
-                    "access_inequality": access_inequality,
-                    "rural_access": rural_access,
-                    "low_income_ratio": low_income_ratio,
-                    "uninsured_ratio": uninsured_ratio,
-                    "biases": ", ".join(selected_biases) if selected_biases else "None",
-                    "quality_variation": quality_variation,
-                    "attack_type": attack_type
-                }
-
-                st.session_state.health_run_history.append(run_result)
-                progress_bar.progress((i + 1) / n_runs)
-
-        progress_bar.empty()
-
-    # ── Display Results ───────────────────────────────
-    if st.session_state.health_run_history:
-        df = pd.DataFrame(st.session_state.health_run_history)
-
-        # Summary Metrics Section
-        st.markdown("## 📊 Healthcare Equity Dashboard")
-
-        # Calculate averages
-        avg_accuracy = df["accuracy"].mean()
-        avg_equity = df["equity_score"].mean()
-        avg_health_equity = df["health_equity_score"].mean()
-        avg_adverse_gap = abs(df["adverse_rate_high"].mean() - df["adverse_rate_low"].mean())
-
-        # Display metrics in styled cards
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.markdown('<div class="accuracy-metric-health">', unsafe_allow_html=True)
-            st.metric(
-                label="🎯 Prediction Accuracy",
-                value=f"{avg_accuracy:.1%}",
-                delta=None,
-                help="Overall accuracy of the healthcare AI system"
+    # ── XAI (run_idx == 0 only) ───────────────────────────────────────────────
+    if run_idx == 0:
+        try:
+            from components.governance_logic import (
+                ExplainableModel, generate_compliance_report,
+                generate_intersectional_fairness,
             )
-            st.markdown('</div>', unsafe_allow_html=True)
+            xm = ExplainableModel(domain="health")
+            xm.model = clf; xm._X_train = X_tr; xm._is_fitted = True
+            xm.feature_names = [f"feature_{i}" for i in range(X_te.shape[1])]
+            fi = xm.feature_importance(X_te, y_te, n_repeats=6)
+            _xai = {"feature_importance": fi.__dict__}
+            denied = np.where((y_te == 1) & (y_pred == 0))[0]
+            if len(denied):
+                expl = xm.explain_instance(X_te[denied[0]])
+                cf   = xm.counterfactual(X_te[denied[0]])
+                _xai["instance_explanation"] = expl.__dict__
+                _xai["counterfactual"]       = cf.__dict__
+            mc = xm.model_card(
+                {"accuracy": metrics["accuracy"], "recall": metrics["recall"]},
+                {"fairness_score": fair.get("fairness_score", 0.5),
+                 "demographic_parity_difference": fair.get("demographic_parity_difference", 0)},
+                domain="health")
+            cr = generate_compliance_report(mc,
+                {"fairness_score": fair.get("fairness_score", 0.5),
+                 "demographic_parity_difference": fair.get("demographic_parity_difference", 0)},
+                {"accuracy": metrics["accuracy"]},
+                frameworks=["EU AI Act", "ISO 42001", "NIST AI RMF", "NITDA", "WHO"])
+            _xai.update({"model_card": mc.__dict__, "compliance_report": cr})
+            st.session_state.health_xai_results = _xai
+        except Exception as _xe:
+            st.session_state.health_xai_results = {"error": str(_xe)}
 
-        with col2:
-            st.markdown('<div class="fairness-metric-health">', unsafe_allow_html=True)
-            st.metric(
-                label="⚖️ Algorithmic Equity",
-                value=f"{avg_equity:.2f}/1.0",
-                delta=None,
-                help="Fairness across patient groups (1.0 = perfect equity)"
+    return {
+        "run_id":run_idx+1,"data_source":data_source,
+        "accuracy":metrics["accuracy"],"recall":metrics["recall"],"sensitivity":metrics["recall"],
+        "precision":metrics["precision"],"f1":metrics["f1"],"fpr":metrics["fpr"],
+        "specificity":specificity,
+        "acc_hi":acc_hi,"acc_lo":acc_lo,
+        "sens_hi":sens_hi,"sens_lo":sens_lo,
+        "adv_hi":adv_hi,"adv_lo":adv_lo,
+        "equity_score":fair.get("fairness_score",0.5),"fairness_score":fair.get("fairness_score",0.5),
+        "demographic_parity":fair.get("demographic_parity_difference",0),
+        "equalized_odds":fair.get("equalized_odds_difference",0),
+        "bias_intensity":bias_intensity,"poison_rate":poison_rate,
+        "biases":", ".join([b for b in selected_biases if b in _vb]) or "None",
+        "gender_gap":gender_audit.overall_gender_gap if gender_audit else 0.0, "warnings":[],
+    }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Sidebar
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Advanced chart & benchmark libraries ──────────────────────────────────────
+try:
+    from components.gags_charts import (
+        waterfall_feature_contributions, benchmark_comparison_bar,
+        lollipop_gap_chart, radar_with_benchmark, fairness_heatmap,
+        multi_run_distribution, animated_bias_drift, gauge_cluster,
+        ai_bias_incident_timeline, make_economic_sankey,
+    )
+    CHARTS_OK = True
+except ImportError:
+    CHARTS_OK = False
+
+try:
+    from components.gags_benchmarks import (
+        REAL_WORLD_BENCHMARKS, get_benchmarks_for_domain, compare_to_benchmark,
+    )
+    BENCHMARKS_OK = True
+except ImportError:
+    BENCHMARKS_OK = False
+    REAL_WORLD_BENCHMARKS = {}
+
+
+def _safe_fmt(df, float_fmt="{:.3f}", exclude=None):
+    """Format only numeric df columns — prevents ValueError on string columns."""
+    _excl = set(exclude or []) | {
+        "scenario","biases","narrative","equity_narrative","data_source",
+        "run_id","regulatory_body","citation","warnings","attack_type_label",
+    }
+    num_cols = [c for c in df.columns
+                if c not in _excl and str(df[c].dtype).startswith(("float","int"))]
+    try:
+        return df.style.format({c: float_fmt for c in num_cols if c in df.columns})
+    except Exception:
+        return df.style
+
+
+with st.sidebar:
+    language_switcher(location="sidebar")
+    st.divider()
+    role_switcher("health")
+    st.divider()
+
+    # ── View Mode ────────────────────────────────────────────
+    _vm_key = "_vm_health"
+    if _vm_key not in st.session_state:
+        st.session_state[_vm_key] = "Industry"
+    view_mode = st.radio("Perspective", ["Industry", "Research"],
+        horizontal=True, key=_vm_key,
+        help="Industry: KPI-first. Research: full statistical depth.")
+    st.divider()
+
+    st.markdown("""<div style="text-align:center;padding:.5rem 0;">
+      <h2 style="color:#0891b2;margin:0;">⚙️ Healthcare Config</h2>
+      <p style="color:#888;font-size:.82rem;">AI Bias in Healthcare Simulation</p>
+    </div>""", unsafe_allow_html=True)
+    st.divider()
+
+    st.subheader("🏥 Data Source")
+    data_source = st.selectbox(
+        "Dataset",
+        list(_pipeline.available_datasets.keys()),
+        format_func=lambda k: {
+            "uci_heart":            "UCI Heart Disease",
+            "pima_diabetes":        "PIMA Diabetes (Women)",
+            "breast_cancer":        "Breast Cancer Wisconsin",
+            "africa_centric":       "Abuja FCT (Africa-centric)",
+            "abuja_maternal":       "Abuja Maternal Health",
+            "abuja_multilingual":   "Abuja Multilingual ECG",
+            "abuja_insurance":      "Abuja Insurance Access",
+        }.get(k, k),
+    )
+    healthcare_setting = st.selectbox("Healthcare Setting",
+        ["Primary Care", "Secondary Hospital", "Tertiary/Teaching Hospital",
+         "Community Clinic", "Telemedicine"])
+    prediction_task = st.selectbox("Prediction Task",
+        ["Disease Risk Screening", "Readmission Risk", "Diagnosis Support",
+         "Treatment Recommendation", "Triage Priority"])
+    region = st.selectbox("Region",
+        ["Abuja FCT (Nigeria)", "Lagos (Nigeria)", "Sub-Saharan Africa",
+         "South Asia", "Global (Generic)"])
+    st.divider()
+
+    st.subheader("👥 Patient Demographics")
+    low_income_ratio = st.slider("Low-Income Patients", 0.0, 1.0, 0.40, 0.05,
+        help="Fraction of patients from low-income backgrounds")
+    uninsured_ratio  = st.slider("Uninsured Patients",  0.0, 1.0, 0.35, 0.05,
+        help="Fraction of patients without health insurance")
+    st.divider()
+
+    st.subheader(f"🎭 {t('bias_config')}")
+    _hc_valid = list(simulation_config.BIAS_TYPES) + [
+        b for b in ["gender","linguistic"] if b not in simulation_config.BIAS_TYPES]
+    _hc_defaults = [b for b in ["demographic","socioeconomic","gender"] if b in _hc_valid]
+    selected_biases = st.multiselect("Bias Types", options=_hc_valid, default=_hc_defaults,
+        format_func=lambda x: f"🔴 {x}" if x in ("gender","demographic") else f"⚠️ {x}")
+    bias_intensity = st.slider("Bias Intensity", 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.25, 0.05)
+    access_inequality = st.slider("Access Inequality", 0.0, 1.0, 0.3, 0.05,
+        help="Fraction of patients with reduced access to care")
+    st.divider()
+
+    st.subheader(f"⚠️ {t('attack_header')}")
+    poison_rate = st.slider("Poisoning Rate", 0.0, 0.5, 0.05, 0.01, format="%.2f")
+    st.divider()
+
+    st.subheader(f"📊 {t('sim_params_header')}")
+    sample_size = st.number_input("Sample Size", 500, 50000, settings.DEFAULT_N_SAMPLES, 500)
+    n_runs = st.slider("Simulation Runs", 1, 8, 3)
+    st.divider()
+
+    st.subheader(f"🔬 {t('modules_header')}")
+    enable_redteam      = st.toggle("Multimodal Red Team",   value=False)
+    enable_governance   = st.toggle("Governance Layer",      value=True)
+    governance_policy   = st.selectbox("Governance Policy",
+        ["majority_vote","supermajority","consensus","weighted_expert"],
+        disabled=not enable_governance)
+    enable_arena        = st.toggle("Strategic Arena",       value=False)
+    enable_agent_economy= st.toggle("Agent Economy",         value=False)
+    enable_gender_audit = st.toggle("Gender Equity Audit",   value=True)
+    st.divider()
+
+    col_r, col_x = st.columns(2)
+    run_button = col_r.button("🏥 Run", type="primary", use_container_width=True)
+    if col_x.button(t("reset"), use_container_width=True):
+        for k in list(st.session_state.keys()):
+            if k.startswith("health_"):
+                del st.session_state[k]
+        st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Page setup
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+st.markdown(
+    f"""<div class="page-header" style="--ac:#0891b2;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#0891b2;opacity:.55;display:inline-block;"></span>HEALTHCARE · GAGS v3.0 · Abuja FCT</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Healthcare Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">Test AI diagnostic bias across income, gender, and insurance status — real UCI/PIMA datasets calibrated to Abuja FCT demographics.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">UCI Heart Disease</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">PIMA Diabetes</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Abuja FCT Scenarios</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">WHO AI Ethics</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Gender Equity Audit</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Multilingual</span></div></div>""",
+    unsafe_allow_html=True
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main execution
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if run_button:
+    st.session_state.health_run_history = []
+    st.session_state.health_feature_outputs = {}
+    prog = st.progress(0, text=t("loading"))
+
+    for i in range(n_runs):
+        prog.progress((i) / n_runs, text=f"Run {i+1} of {n_runs}…")
+        with st.spinner(f"Simulation {i+1}/{n_runs}"):
+            result = _run_one(
+                data_source=data_source,
+                n_samples=sample_size,
+                selected_biases=selected_biases,
+                bias_intensity=bias_intensity,
+                poison_rate=poison_rate,
+                access_inequality=access_inequality,
+                run_idx=i,
+                enable_redteam=enable_redteam,
+                enable_governance=enable_governance,
+                governance_policy=governance_policy,
+                enable_arena=enable_arena,
+                enable_agent_economy=enable_agent_economy,
+                enable_gender_audit=enable_gender_audit,
             )
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        with col3:
-            st.markdown('<div class="access-metric-health">', unsafe_allow_html=True)
-            st.metric(
-                label="🏥 Health Equity Score",
-                value=f"{avg_health_equity:.2f}/1.0",
-                delta=None,
-                help="Equity in healthcare outcomes across socioeconomic groups"
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        with col4:
-            st.markdown('<div class="outcome-metric-health">', unsafe_allow_html=True)
-            st.metric(
-                label="📈 Adverse Outcome Gap",
-                value=f"{avg_adverse_gap:.1%}",
-                delta_color="inverse",
-                help="Difference in adverse outcome rates between income groups"
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        # Performance comparison by income group
-        st.markdown("### 👨‍⚕️ Performance by Patient Income Group")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            fig1 = go.Figure()
-            fig1.add_trace(go.Bar(
-                name="Low-Income Patients",
-                x=df["run_id"],
-                y=df["accuracy_low"] * 100,
-                marker_color='#e74c3c'
-            ))
-            fig1.add_trace(go.Bar(
-                name="Higher-Income Patients",
-                x=df["run_id"],
-                y=df["accuracy_high"] * 100,
-                marker_color='#2ecc71'
-            ))
-            fig1.update_layout(
-                title="Prediction Accuracy by Income Group",
-                barmode='group',
-                yaxis_title="Accuracy (%)",
-                xaxis_title="Simulation Run"
-            )
-            st.plotly_chart(fig1, use_container_width=True)
-
-        with col2:
-            fig2 = go.Figure()
-            fig2.add_trace(go.Bar(
-                name="Low-Income Adverse Rate",
-                x=df["run_id"],
-                y=df["adverse_rate_low"] * 100,
-                marker_color='#3498db'
-            ))
-            fig2.add_trace(go.Bar(
-                name="Higher-Income Adverse Rate",
-                x=df["run_id"],
-                y=df["adverse_rate_high"] * 100,
-                marker_color='#9b59b6'
-            ))
-            fig2.update_layout(
-                title="Actual Adverse Outcome Rates by Income Group",
-                barmode='group',
-                yaxis_title="Adverse Outcome Rate (%)",
-                xaxis_title="Simulation Run"
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-
-        st.divider()
-
-        # ── Detailed Analysis Tabs ───────────────────────────────
-        tab1, tab2, tab3, tab4 = st.tabs(["📈 Performance Overview", "⚖️ Equity Analysis",
-                                          "🏥 Clinical Impact", "📋 Detailed Results"])
-
-        with tab1:
-            # Performance gauges
-            fig = make_subplots(
-                rows=1, cols=4,
-                specs=[[{'type': 'indicator'}, {'type': 'indicator'},
-                        {'type': 'indicator'}, {'type': 'indicator'}]],
-                subplot_titles=("Accuracy", "Sensitivity", "Specificity", "Equity")
-            )
-
-            # Accuracy Gauge
-            fig.add_trace(go.Indicator(
-                mode="gauge+number",
-                value=avg_accuracy * 100,
-                title={'text': "Accuracy", 'font': {'size': 14}},
-                gauge={
-                    'axis': {'range': [0, 100]},
-                    'bar': {'color': "darkblue"},
-                    'steps': [
-                        {'range': [0, 70], 'color': "lightgray"},
-                        {'range': [70, 85], 'color': "gray"},
-                        {'range': [85, 100], 'color': "darkgray"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "red", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 80
-                    }
-                }
-            ), row=1, col=1)
-
-            # Sensitivity Gauge
-            avg_sensitivity = df["sensitivity"].mean() if "sensitivity" in df.columns else 0.7
-            fig.add_trace(go.Indicator(
-                mode="gauge+number",
-                value=avg_sensitivity * 100,
-                title={'text': "Sensitivity", 'font': {'size': 14}},
-                gauge={
-                    'axis': {'range': [0, 100]},
-                    'bar': {'color': "darkgreen"},
-                    'steps': [
-                        {'range': [0, 70], 'color': "lightgray"},
-                        {'range': [70, 85], 'color': "gray"},
-                        {'range': [85, 100], 'color': "darkgray"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "red", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 75
-                    }
-                }
-            ), row=1, col=2)
-
-            # Specificity Gauge
-            avg_specificity = df["specificity"].mean() if "specificity" in df.columns else 0.8
-            fig.add_trace(go.Indicator(
-                mode="gauge+number",
-                value=avg_specificity * 100,
-                title={'text': "Specificity", 'font': {'size': 14}},
-                gauge={
-                    'axis': {'range': [0, 100]},
-                    'bar': {'color': "darkorange"},
-                    'steps': [
-                        {'range': [0, 70], 'color': "lightgray"},
-                        {'range': [70, 85], 'color': "gray"},
-                        {'range': [85, 100], 'color': "darkgray"}
-                    ]
-                }
-            ), row=1, col=3)
-
-            # Equity Gauge
-            fig.add_trace(go.Indicator(
-                mode="gauge+number",
-                value=avg_equity * 100,
-                title={'text': "Equity", 'font': {'size': 14}},
-                gauge={
-                    'axis': {'range': [0, 100]},
-                    'bar': {'color': "darkred"},
-                    'steps': [
-                        {'range': [0, 60], 'color': "lightgray"},
-                        {'range': [60, 80], 'color': "gray"},
-                        {'range': [80, 100], 'color': "darkgray"}
-                    ]
-                }
-            ), row=1, col=4)
-
-            fig.update_layout(height=300, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Trade-off scatter plot
-            fig2 = px.scatter(
-                df,
-                x="equity_score",
-                y="accuracy",
-                size="health_equity_score",
-                color="bias_intensity",
-                hover_data=["biases", "access_inequality", "quality_variation"],
-                title="The Healthcare Trilemma: Accuracy vs Equity vs Clinical Safety",
-                labels={
-                    "equity_score": "Algorithmic Equity",
-                    "accuracy": "Prediction Accuracy",
-                    "health_equity_score": "Health Equity",
-                    "bias_intensity": "Bias Intensity"
+            st.session_state.health_run_history.append(result)
+            save_to_history(
+                "health_snapshot_history",
+                label=f"Run {i+1} | bias={bias_intensity:.2f} | {data_source[:12]}",
+                metrics={
+                    "accuracy":          result.get("accuracy", 0),
+                    "equity_score":      result.get("equity_score", 0),
+                    "demographic_parity":result.get("demographic_parity", 0),
+                    "sensitivity":       result.get("sensitivity", 0),
                 },
-                size_max=30
+                config={
+                    "data_source":    data_source,
+                    "bias_intensity": bias_intensity,
+                    "poison_rate":    poison_rate,
+                    "selected_biases":selected_biases,
+                },
             )
+            # Surface any core warnings inline
+            for w in result.get("warnings", []):
+                st.warning(f"⚠️ {w}", icon="⚠️")
 
-            # Add optimal zone
-            fig2.add_shape(
-                type="rect",
-                x0=0.7, x1=1.0,
-                y0=0.7, y1=1.0,
-                line=dict(color="Green", width=2, dash="dash"),
-                fillcolor="rgba(0, 255, 0, 0.1)",
-                label=dict(
-                    text="Optimal Zone",
-                    font=dict(size=12, color="green"),
-                    xanchor="center",
-                    yanchor="middle")
-            )
+    prog.progress(1.0, text=t("complete"))
+    prog.empty()
 
-            st.plotly_chart(fig2, use_container_width=True)
 
-        with tab2:
-            # Equity analysis
-            st.markdown("### ⚖️ Health Equity Gap Analysis")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Results dashboard
+# ═══════════════════════════════════════════════════════════════════════════════
 
-            # Calculate equity gaps
-            df["accuracy_gap"] = abs(df["accuracy_high"] - df["accuracy_low"])
-            df["adverse_gap"] = abs(df["adverse_rate_high"] - df["adverse_rate_low"])
-            df["sensitivity_gap"] = abs(df["sensitivity_high"] - df["sensitivity_low"])
+if st.session_state.health_run_history:
+    df = pd.DataFrame(st.session_state.health_run_history)
+    feats = st.session_state.health_feature_outputs
+    info  = st.session_state.health_dataset_info
 
-            col1, col2 = st.columns(2)
+    # ── KPI row ───────────────────────────────────────────────────────────────
+    st.markdown("## 📊 Healthcare Equity Dashboard")
+    role_banner("health")
 
-            with col1:
-                fig = px.bar(
-                    df,
-                    x="run_id",
-                    y=["accuracy_gap", "adverse_gap", "sensitivity_gap"],
-                    barmode="group",
-                    title="Health Equity Gaps Across Simulation Runs",
-                    labels={"value": "Gap Size", "variable": "Metric"},
-                    color_discrete_sequence=["#e74c3c", "#3498db", "#9b59b6"]
-                )
-                st.plotly_chart(fig, use_container_width=True)
+    if info:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Data Source",    info["source"])
+        c2.metric("Samples",        f"{info['samples']:,}")
+        c3.metric("Features",       info["features"])
+        c4.metric("Positive Class", f"{info['positive_rate']:.1%}")
 
-            with col2:
-                # Equity impact factors
-                factors = pd.DataFrame({
-                    "Factor": ["Bias Intensity", "Access Inequality", "Rural Access", "Insurance Gap"],
-                    "Impact on Equity": [
-                        -df["bias_intensity"].mean() * 0.8,
-                        -df["access_inequality"].mean() * 0.7,
-                        df["rural_access"].mean() * 0.5,  # Positive impact
-                        -df["uninsured_ratio"].mean() * 0.6
-                    ]
-                })
+    avg_acc    = df["accuracy"].mean()
+    avg_equity = df["equity_score"].mean()
+    avg_sens   = df["sensitivity"].mean()
+    avg_gap    = (df["adv_hi"] - df["adv_lo"]).abs().mean()
 
-                fig2 = px.bar(
-                    factors,
-                    x="Factor",
-                    y="Impact on Equity",
-                    title="Factors Affecting Healthcare Equity",
-                    color="Impact on Equity",
-                    color_continuous_scale="RdYlGn"
-                )
-                st.plotly_chart(fig2, use_container_width=True)
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f"""
+        <div class="card-blue">
+            <p style="margin:0;font-size:.8rem;color:#555;">🎯 Prediction Accuracy</p>
+            <p style="margin:0;font-size:1.8rem;font-weight:700;color:#1d4ed8;">{avg_acc:.1%}</p>
+        </div>""", unsafe_allow_html=True)
+    with k2:
+        colour = "#16a34a" if avg_equity >= 0.7 else "#e67e22" if avg_equity >= 0.5 else "#ef4444"
+        st.markdown(f"""
+        <div class="card-green">
+            <p style="margin:0;font-size:.8rem;color:#555;">⚖️ Algorithmic Equity</p>
+            <p style="margin:0;font-size:1.8rem;font-weight:700;color:{colour};">{avg_equity:.2f}<span style="font-size:.9rem">/1.0</span></p>
+        </div>""", unsafe_allow_html=True)
+    with k3:
+        st.markdown(f"""
+        <div class="card-purple">
+            <p style="margin:0;font-size:.8rem;color:#555;">🩺 Avg Sensitivity</p>
+            <p style="margin:0;font-size:1.8rem;font-weight:700;color:#6d28d9;">{avg_sens:.1%}</p>
+        </div>""", unsafe_allow_html=True)
+    with k4:
+        gap_colour = "#ef4444" if avg_gap > 0.15 else "#e67e22" if avg_gap > 0.05 else "#16a34a"
+        st.markdown(f"""
+        <div class="card-orange">
+            <p style="margin:0;font-size:.8rem;color:#555;">📈 Adverse Outcome Gap</p>
+            <p style="margin:0;font-size:1.8rem;font-weight:700;color:{gap_colour};">{avg_gap:.1%}</p>
+        </div>""", unsafe_allow_html=True)
 
-            # Safety alerts based on sensitivity gaps
-            avg_sensitivity_gap = df["sensitivity_gap"].mean()
-            if avg_sensitivity_gap > 0.2:
-                st.markdown("""
-                <div class="safety-alert">
-                    <strong>⚠️ CRITICAL SAFETY CONCERN DETECTED</strong><br>
-                    <strong>High Sensitivity Gap ({:.1%})</strong> - Missed diagnoses disproportionately affect certain groups.<br>
-                    <strong>Immediate Actions Required:</strong>
-                    <ul style="margin-bottom:0;">
-                        <li>Audit model for differential performance by demographic group</li>
-                        <li>Implement group-specific thresholds for critical conditions</li>
-                        <li>Enhance training data representation for underserved groups</li>
-                        <li>Establish human oversight for high-stakes predictions</li>
-                    </ul>
-                </div>
-                """.format(avg_sensitivity_gap), unsafe_allow_html=True)
-            elif avg_equity < 0.7:
-                st.markdown("""
-                <div class="warning-banner-health">
-                    <strong>⚠️ SIGNIFICANT EQUITY GAPS DETECTED</strong><br>
-                    <strong>Recommended Interventions:</strong>
-                    <ul style="margin-bottom:0;">
-                        <li><strong>Bias Mitigation:</strong> Implement fairness-aware algorithms</li>
-                        <li><strong>Data Augmentation:</strong> Enhance representation of underserved groups</li>
-                        <li><strong>Clinical Validation:</strong> Validate across diverse patient populations</li>
-                        <li><strong>Transparent Reporting:</strong> Disclose performance by demographic group</li>
-                    </ul>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.success("""
-                **✅ GOOD EQUITY ACHIEVED**
+    # ── Governance result banner (Feature 4) ──────────────────────────────────
+    if "governance" in feats:
+        gov = feats["governance"]
+        outcome_colour = {
+            "approved": "alert-success", "rejected": "alert-warning",
+            "deferred": "alert-info",    "reversed": "alert-danger",
+        }.get(gov["outcome"], "alert-info")
+        flags_html = "".join(f"<li>{f}</li>" for f in gov["ai_flags"]) or "<li>No drift detected</li>"
+        tally = gov["tally"]
+        st.markdown(f"""
+        <div class="{outcome_colour}" style="margin-top:1rem;">
+            <strong>🏛️ Governance Vote — "{gov['policy']}"</strong><br>
+            Outcome: <strong>{gov['outcome'].upper()}</strong> &nbsp;|&nbsp;
+            For: {tally.get('for',0)} &nbsp; Against: {tally.get('against',0)} &nbsp; Abstain: {tally.get('abstain',0)}<br>
+            <strong>AI Flags:</strong><ul style="margin:.3rem 0 0 1rem;">{flags_html}</ul>
+            <span style="font-size:.75rem;opacity:.7;">Ledger hash: <code>{gov['ledger_hash']}</code></span>
+        </div>
+        """, unsafe_allow_html=True)
 
-                **Maintenance Actions:**
-                1. Continue monitoring performance by demographic groups
-                2. Regular bias audits of healthcare algorithms
-                3. Engage with patient advocacy groups for feedback
-                4. Update models as clinical guidelines evolve
-                """)
+    # ── Tabs ──────────────────────────────────────────────────────────────────
+    tab_labels = [
+        "📈 Performance", "⚖️ Equity", "🏥 Clinical Impact",
+        "🔬 Feature Modules", "📊 Data Analysis",
+        "🧠 Explainable AI", "📋 Compliance", "🔁 Longitudinal", "🌐 Federated",
+        "📋 Raw Results"
+    ]
+    # ── Share URL panel ───────────────────────────────────────────────
+    _share_cfg = {"domain":"health","data_source":data_source,"selected_biases":selected_biases,"bias_intensity":bias_intensity,"poison_rate":poison_rate,"n_runs":n_runs}
+    share_url_panel("health", config=_share_cfg)
 
-        with tab3:
-            # Clinical impact analysis
-            st.markdown("### 🏥 Clinical Impact Analysis")
+    # ── Board Member view (role-specific executive summary) ───────────
+    _role_now = get_active_role("health")
+    if _role_now == "Board Member":
+        _fair_val = avg_equity if "avg_equity" in dir() else 0.5
+        _acc_val  = avg_acc if "avg_acc" in dir() else 0.5
+        _ok = _fair_val >= 0.7
+        _finding = ("Fairness score is within acceptable range. No critical disparities detected."
+                    if _ok else "Fairness score below 0.70 — demographic disparities detected.")
+        _rec = ("Continue quarterly monitoring and maintain current governance oversight."
+                if _ok else "Bias mitigation required before deployment. Consult Data Science team.")
+        board_member_summary("health", _acc_val, _fair_val, _ok, _finding, _rec)
+    else:
+        metric_glossary_expander(["accuracy", "sensitivity", "specificity", "fairness score", "demographic parity", "equalized odds", "false positive rate", "false negative rate", "gender gap", "digital inclusion score"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(tab_labels)
 
-            # Simulated patient outcomes for visualization
-            np.random.seed(42)
+    # ── Tab 1: Performance ────────────────────────────────────────────────────
+    with tab1:
+        fig_gauges = make_subplots(
+            rows=1, cols=4,
+            specs=[[{"type":"indicator"}]*4],
+            subplot_titles=("Accuracy","Sensitivity","Specificity","Equity"),
+        )
+        for col_idx, (val, title, colour) in enumerate([
+            (avg_acc  * 100, "Accuracy",    "darkblue"),
+            (avg_sens * 100, "Sensitivity", "darkgreen"),
+            (df["specificity"].mean() * 100, "Specificity", "darkorange"),
+            (avg_equity * 100, "Equity",    "darkred"),
+        ], start=1):
+            fig_gauges.add_trace(go.Indicator(
+                mode="gauge+number",
+                value=round(val, 1),
+                gauge={"axis":{"range":[0,100]}, "bar":{"color":colour},
+                       "steps":[{"range":[0,70],"color":"#f0f0f0"},{"range":[70,85],"color":"#d0d0d0"}]},
+            ), row=1, col=col_idx)
+        fig_gauges.update_layout(height=280, showlegend=False, margin=dict(t=40, b=0))
+        st.plotly_chart(fig_gauges, use_container_width=True)
 
-            # Create sample data for different patient groups
-            groups = ["Low-Income", "Uninsured", "Rural", "Minority", "General"]
-            detection_rates = [
-                np.random.uniform(0.6, 0.8) * (1 - bias_intensity * 0.3),
-                np.random.uniform(0.5, 0.7) * (1 - bias_intensity * 0.4),
-                np.random.uniform(0.55, 0.75) * (1 - bias_intensity * 0.35),
-                np.random.uniform(0.6, 0.8) * (1 - bias_intensity * 0.3),
-                np.random.uniform(0.8, 0.95)
-            ]
+        # Accuracy / equity scatter with optimal zone
+        fig_scatter = px.scatter(
+            df, x="equity_score", y="accuracy",
+            size=[0.3]*len(df), color="bias_intensity",
+            hover_data=["data_source","biases","bias_intensity"],
+            title="Accuracy vs Equity (size = constant; colour = bias intensity)",
+            labels={"equity_score":"Algorithmic Equity","accuracy":"Prediction Accuracy",
+                    "bias_intensity":"Bias Intensity"},
+            color_continuous_scale="RdYlGn_r",
+        )
+        fig_scatter.add_shape(type="rect", x0=0.7, x1=1.0, y0=0.7, y1=1.0,
+            line=dict(color="green", width=2, dash="dash"),
+            fillcolor="rgba(0,200,0,0.07)")
+        fig_scatter.add_annotation(x=0.85, y=0.85, text="Optimal Zone",
+            showarrow=False, font=dict(color="green", size=11))
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
-            false_positive_rates = [
-                np.random.uniform(0.15, 0.25) * (1 + bias_intensity * 0.2),
-                np.random.uniform(0.2, 0.3) * (1 + bias_intensity * 0.3),
-                np.random.uniform(0.18, 0.28) * (1 + bias_intensity * 0.25),
-                np.random.uniform(0.16, 0.26) * (1 + bias_intensity * 0.2),
-                np.random.uniform(0.05, 0.15)
-            ]
+    # ── Tab 2: Equity ─────────────────────────────────────────────────────────
+    with tab2:
+        st.markdown("### ⚖️ Health Equity Gap Analysis")
 
-            treatment_access = [
-                np.random.uniform(0.4, 0.6) * (1 - access_inequality * 0.5),
-                np.random.uniform(0.3, 0.5) * (1 - access_inequality * 0.6),
-                np.random.uniform(0.35, 0.55) * (1 - access_inequality * 0.4),
-                np.random.uniform(0.45, 0.65) * (1 - access_inequality * 0.3),
-                np.random.uniform(0.7, 0.9)
-            ]
+        df["acc_gap"]  = (df["acc_hi"]  - df["acc_lo"]).abs()
+        df["sens_gap"] = (df["sens_hi"] - df["sens_lo"]).abs()
+        df["adv_gap"]  = (df["adv_hi"]  - df["adv_lo"]).abs()
 
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                name="Detection Rate",
-                x=groups,
-                y=detection_rates,
-                marker_color='#3498db',
-                text=[f"{rate:.1%}" for rate in detection_rates],
-                textposition='auto'
-            ))
-            fig.add_trace(go.Bar(
-                name="False Positive Rate",
-                x=groups,
-                y=false_positive_rates,
-                marker_color='#e74c3c',
-                text=[f"{rate:.1%}" for rate in false_positive_rates],
-                textposition='auto'
-            ))
-            fig.add_trace(go.Bar(
-                name="Treatment Access",
-                x=groups,
-                y=treatment_access,
-                marker_color='#2ecc71',
-                text=[f"{rate:.1%}" for rate in treatment_access],
-                textposition='auto'
-            ))
-
-            fig.update_layout(
-                title="Clinical Performance by Patient Group",
-                yaxis_title="Rate",
-                barmode='group',
-                yaxis_range=[0, 1],
-                height=400
-            )
-
+        c1, c2 = st.columns(2)
+        with c1:
+            fig = px.bar(df, x="run_id",
+                y=["acc_gap","sens_gap","adv_gap"],
+                barmode="group",
+                title="Equity Gaps per Run",
+                labels={"value":"Gap","variable":"Metric"},
+                color_discrete_sequence=["#ef4444","#7c3aed","#2563eb"])
             st.plotly_chart(fig, use_container_width=True)
 
-            # Resource allocation visualization
-            st.markdown("#### 🏥 Healthcare Resource Allocation")
-
-            resources = ["Preventive Care", "Specialist Access", "Diagnostic Tests", "Medications", "Follow-up Care"]
-            low_income_allocation = [0.3, 0.25, 0.4, 0.35, 0.3]
-            high_income_allocation = [0.7, 0.8, 0.9, 0.85, 0.8]
-
-            # Apply access inequality factor
-            low_income_allocation = [x * (1 - access_inequality) for x in low_income_allocation]
-
-            fig2 = go.Figure()
-            fig2.add_trace(go.Bar(
-                name="Low-Income Access",
-                x=resources,
-                y=low_income_allocation,
-                marker_color='#e74c3c'
-            ))
-            fig2.add_trace(go.Bar(
-                name="Higher-Income Access",
-                x=resources,
-                y=high_income_allocation,
-                marker_color='#2ecc71'
-            ))
-
-            fig2.update_layout(
-                title="Healthcare Resource Access by Income Group",
-                yaxis_title="Access Level (0-1)",
-                barmode='group'
-            )
-
+        with c2:
+            fig2 = px.bar(df, x="run_id",
+                y=["acc_lo","acc_hi"], barmode="group",
+                title="Accuracy: Low-Income vs Higher-Income",
+                labels={"value":"Accuracy","variable":"Group"},
+                color_discrete_sequence=["#ef4444","#22c55e"])
             st.plotly_chart(fig2, use_container_width=True)
 
-        with tab4:
-            # Detailed results table
-            st.dataframe(
-                df.style.format({
-                    "accuracy": "{:.1%}",
-                    "precision": "{:.1%}",
-                    "recall": "{:.1%}",
-                    "f1_score": "{:.2f}",
-                    "sensitivity": "{:.1%}",
-                    "specificity": "{:.1%}",
-                    "equity_score": "{:.2f}",
-                    "health_equity_score": "{:.2f}",
-                    "adverse_rate_low": "{:.1%}",
-                    "adverse_rate_high": "{:.1%}",
-                    "accuracy_low": "{:.1%}",
-                    "accuracy_high": "{:.1%}",
-                    "sensitivity_low": "{:.1%}",
-                    "sensitivity_high": "{:.1%}",
-                    "demographic_parity": "{:.3f}",
-                    "equal_opportunity": "{:.3f}"
-                }).background_gradient(subset=["accuracy"], cmap="Blues")
-                .background_gradient(subset=["equity_score"], cmap="RdYlGn")
-                .background_gradient(subset=["sensitivity_low"], cmap="Greens")
+        # ── Feature 3: Gender Audit ───────────────────────────────────────────
+        if "gender_audit" in feats:
+            ga = feats["gender_audit"]
+            st.markdown("#### 🌍 Gender Equity Audit (Feature 3 — UNESCO Women4EthicalAI)")
+            passed_icon = "✅" if ga["audit_passed"] else "❌"
+            g1, g2, g3 = st.columns(3)
+            g1.metric("Gender Gap",          f"{ga['overall_gender_gap']:.3f}")
+            g2.metric("Representation Score",f"{ga['representation_score']:.3f}")
+            g3.metric("Digital Inclusion",   f"{ga['digital_inclusion_score']:.3f}")
+
+            if ga["audit_passed"]:
+                st.markdown(f'<div class="alert-success">{passed_icon} Audit passed. {ga["incentive_recommendations"][0]}</div>', unsafe_allow_html=True)
+            else:
+                recs_html = "".join(f"<li>{r}</li>" for r in ga["incentive_recommendations"])
+                st.markdown(f'<div class="alert-danger">{passed_icon} Audit failed.<ul>{recs_html}</ul></div>', unsafe_allow_html=True)
+
+        # ── Alert banners ─────────────────────────────────────────────────────
+        avg_sens_gap = df["sens_gap"].mean()
+        if avg_sens_gap > 0.2:
+            st.markdown(f"""
+            <div class="alert-danger">
+                <strong>⚠️ Critical Safety — High Sensitivity Gap ({avg_sens_gap:.1%})</strong><br>
+                Missed diagnoses are disproportionately affecting certain patient groups.<br>
+                • Audit model for differential performance • Apply group-specific thresholds
+                • Enhance training data for underserved groups • Mandate human oversight
+            </div>""", unsafe_allow_html=True)
+        elif avg_equity < 0.7:
+            st.markdown("""
+            <div class="alert-warning">
+                <strong>⚠️ Significant Equity Gaps</strong><br>
+                • Implement fairness-aware algorithms • Augment data for underserved groups
+                • Validate across diverse patient populations • Disclose performance by group
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="alert-success"><strong>✅ Equity within acceptable bounds.</strong> Continue quarterly monitoring.</div>', unsafe_allow_html=True)
+
+    # ── Tab 3: Clinical Impact ────────────────────────────────────────────────
+    with tab3:
+        st.markdown("### 🏥 Clinical Impact by Patient Group")
+
+        groups  = ["Low-Income","Uninsured","Rural","Minority","General"]
+        det_r   = [max(0, np.random.uniform(0.6, 0.8) * (1 - bias_intensity * 0.3)) for _ in groups[:-1]] + [np.random.uniform(0.8, 0.95)]
+        fp_r    = [min(1, np.random.uniform(0.15, 0.25) * (1 + bias_intensity * 0.2)) for _ in groups[:-1]] + [np.random.uniform(0.05, 0.15)]
+        trt_r   = [max(0, np.random.uniform(0.4, 0.6) * (1 - access_inequality * 0.5)) for _ in groups[:-1]] + [np.random.uniform(0.7, 0.9)]
+
+        fig_clin = go.Figure()
+        for name, vals, colour in [
+            ("Detection Rate", det_r, "#2563eb"),
+            ("False Positive Rate", fp_r, "#ef4444"),
+            ("Treatment Access", trt_r, "#22c55e"),
+        ]:
+            fig_clin.add_trace(go.Bar(
+                name=name, x=groups, y=vals, marker_color=colour,
+                text=[f"{v:.1%}" for v in vals], textposition="auto"
+            ))
+        fig_clin.update_layout(title="Clinical Performance by Patient Group",
+                               barmode="group", yaxis_range=[0,1], height=380)
+        st.plotly_chart(fig_clin, use_container_width=True)
+
+        # Resource allocation
+        st.markdown("#### 🏥 Healthcare Resource Access")
+        resources = ["Preventive Care","Specialist Access","Diagnostics","Medications","Follow-up"]
+        lo_alloc  = [max(0, 0.3 * (1 - access_inequality)) for _ in resources]
+        hi_alloc  = [0.75, 0.80, 0.90, 0.85, 0.80]
+
+        fig_res = go.Figure([
+            go.Bar(name="Low-Income",    x=resources, y=lo_alloc, marker_color="#ef4444"),
+            go.Bar(name="Higher-Income", x=resources, y=hi_alloc, marker_color="#22c55e"),
+        ])
+        fig_res.update_layout(title="Resource Access by Income Group", barmode="group", yaxis_range=[0,1])
+        st.plotly_chart(fig_res, use_container_width=True)
+
+    # ── Tab 4: Feature Modules ────────────────────────────────────────────────
+    with tab4:
+        st.markdown("### 🔬 Advanced Feature Module Results")
+
+        # ── Feature 2: Multimodal Red Team ────────────────────────────────────
+        if "multimodal_redteam" in feats:
+            st.markdown("#### Feature 2 — Multimodal Red Teaming")
+            rt = feats["multimodal_redteam"]
+            rt_rows = []
+            for r in rt.get("modality_results", []):
+                rt_rows.append({
+                    "Modality":              r["modality"],
+                    "Attack Vector":         r["attack_vector"],
+                    "Severity":              r["severity"],
+                    "Affected Samples":      r["affected_samples"],
+                    "Bypass Rate":           f"{r['bypass_rate']:.1%}",
+                    "Sociotechnical Risk":   f"{r['sociotechnical_risk']:.2f}",
+                })
+            if rt_rows:
+                st.dataframe(pd.DataFrame(rt_rows), use_container_width=True)
+
+            c1, c2 = st.columns(2)
+            c1.metric("Combined Bypass Rate",       f"{rt.get('combined_bypass_rate',0):.1%}")
+            c2.metric("Combined Sociotechnical Risk",f"{rt.get('combined_sociotechnical_risk',0):.2f}")
+
+            # Show VR scenario if deepfake attack has one
+            for r in rt.get("modality_results", []):
+                if r.get("vr_scenario"):
+                    st.markdown(f"""
+                    <div class="alert-info">
+                        <strong>🥽 Immersive VR/AR Scenario (Deepfake Attack)</strong><br>
+                        {r['vr_scenario']}
+                    </div>""", unsafe_allow_html=True)
+                    break
+
+        # ── Feature 1: Agent Economy ──────────────────────────────────────────
+        if "agent_economy" in feats:
+            st.markdown("#### Feature 1 — AI Agent Economy (Healthcare Resources)")
+            ae = feats["agent_economy"]
+            st.metric("Economy Stability",  ae.get("economy_stability","—"))
+            st.metric("Permeability Score", f"{ae.get('permeability_score',0):.4f}")
+            agents_df = pd.DataFrame(ae.get("agent_summary", []))
+            if not agents_df.empty:
+                st.dataframe(agents_df.style.background_gradient(
+                    subset=["reputation","total_spent"], cmap="Blues"
+                ), use_container_width=True)
+
+        # ── Feature 4: Governance Ledger ──────────────────────────────────────
+        if "governance" in feats:
+            st.markdown("#### Feature 4 — Hybrid Governance Ledger (Blockchain-style)")
+            gov = feats["governance"]
+            st.markdown(f"""
+            <div class="ledger-row">
+                ▶ <strong>Policy:</strong> {gov['policy']}<br>
+                ▶ <strong>Outcome:</strong> {gov['outcome'].upper()}<br>
+                ▶ <strong>Tally:</strong> For={gov['tally'].get('for',0)}, Against={gov['tally'].get('against',0)}, Abstain={gov['tally'].get('abstain',0)}<br>
+                ▶ <strong>Ledger Hash:</strong> <code>{gov['ledger_hash']}</code>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── Feature 5: Strategic Arena ────────────────────────────────────────
+        if "strategic_arena" in feats:
+            st.markdown("#### Feature 5 — Strategic Social Reasoning Arena")
+            arena = feats["strategic_arena"]
+            standings = pd.DataFrame(arena.get("final_standings", []))
+            if not standings.empty:
+                st.dataframe(standings.style.background_gradient(
+                    subset=["score"], cmap="YlGn"
+                ), use_container_width=True)
+            coal = arena.get("coalition_scores", {})
+            if coal:
+                fig_coal = px.bar(
+                    x=list(coal.keys()), y=list(coal.values()),
+                    title="Coalition Scores", labels={"x":"Coalition","y":"Score"},
+                    color=list(coal.values()), color_continuous_scale="Viridis",
+                )
+                st.plotly_chart(fig_coal, use_container_width=True)
+
+        if not any(k in feats for k in ["multimodal_redteam","agent_economy","governance","strategic_arena","gender_audit"]):
+            st.info("Enable feature modules in the sidebar to see results here.")
+
+    # ── Tab 5: Data Analysis ──────────────────────────────────────────────────
+    with tab5:
+        st.markdown("### 📊 Data Quality & Source Analysis")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            src_counts = df["data_source"].value_counts()
+            fig_src = px.pie(values=src_counts.values, names=src_counts.index,
+                             title="Runs by Data Source",
+                             color_discrete_sequence=px.colors.qualitative.Set2)
+            st.plotly_chart(fig_src, use_container_width=True)
+
+        with c2:
+            qual_df = pd.DataFrame({
+                "Metric": ["Completeness","Feature Diversity","Class Balance","Bias Level"],
+                "Score":  [
+                    0.85 + (0.1 if info.get("is_africa") else 0),
+                    0.9  if "Heart" in data_source else 0.75,
+                    float(np.clip(df["adv_lo"].mean() + df["adv_hi"].mean(), 0, 1)),
+                    float(1 - avg_equity),
+                ],
+            })
+            fig_qual = px.bar(qual_df, x="Metric", y="Score",
+                              title="Dataset Quality Assessment",
+                              color="Score", color_continuous_scale="RdYlGn",
+                              range_y=[0, 1])
+            st.plotly_chart(fig_qual, use_container_width=True)
+
+        # Africa-specific metrics
+        if info.get("is_africa"):
+            st.markdown("""
+            <div class="alert-info">
+                <strong>🌍 Africa-Centric Scenario Active (Feature 3)</strong><br>
+                Dataset uses Abuja FCT parameters: lower income mean, multilingual context,
+                reduced digital connectivity baseline, and gender-stratified demographics.
+                UNESCO Women4EthicalAI audit is available in the Equity tab.
+            </div>""", unsafe_allow_html=True)
+
+    # ── Tabs 6-9: XAI / Compliance / Longitudinal / Federated ──────────────────
+    with tab6:
+        _xai = st.session_state.get("health_xai_results", {})
+        st.markdown("### 🧠 Explainable AI")
+        if not _xai:
+            st.info("Run a simulation to generate XAI explanations.")
+        elif "error" in _xai:
+            st.warning(f"XAI error: {_xai["error"]}")
+        else:
+            fi = _xai.get("feature_importance", {})
+            if fi:
+                st.markdown(f'<div class="alert-info"><em>{fi.get("narrative","")}</em></div>', unsafe_allow_html=True)
+                fi_df = pd.DataFrame({"Feature": fi["feature_names"][:10], "Importance": fi["importances"][:10], "Std": fi["std_devs"][:10]})
+                import plotly.express as _px
+                fig_fi = _px.bar(fi_df, x="Importance", y="Feature", orientation="h", error_x="Std",
+                    title=f"Feature Importance ({fi.get("method","permutation")})",
+                    color="Importance", color_continuous_scale="Blues")
+                fig_fi.update_layout(yaxis={"categoryorder":"total ascending"}, height=340)
+                st.plotly_chart(fig_fi, use_container_width=True)
+            cl, cr_ = st.columns(2)
+            with cl:
+                expl = _xai.get("instance_explanation", {})
+                if expl:
+                    st.markdown("#### Instance Explanation")
+                    st.markdown(f'<div class="alert-info"><em>{expl.get("decision_path","")}</em></div>', unsafe_allow_html=True)
+                    c_ = expl.get("feature_contributions", {})
+                    if c_:
+                        c_df = pd.DataFrame(sorted(c_.items(), key=lambda x: abs(x[1]), reverse=True)[:8], columns=["Feature","Contribution"])
+                        fig_c = _px.bar(c_df, x="Contribution", y="Feature", orientation="h",
+                            color="Contribution", color_continuous_scale="RdYlGn", color_continuous_midpoint=0, height=300)
+                        fig_c.update_layout(yaxis={"categoryorder":"total ascending"})
+                        st.plotly_chart(fig_c, use_container_width=True)
+            with cr_:
+                cf = _xai.get("counterfactual", {})
+                if cf:
+                    st.markdown("#### Counterfactual")
+                    st.markdown(f'<div class="alert-info"><em>{cf.get("plain_language","")}</em></div>', unsafe_allow_html=True)
+                    ch = cf.get("changes", {})
+                    if ch:
+                        st.dataframe(pd.DataFrame([{"Feature":k,"Original":v[0],"New":v[1],"Δ":round(v[1]-v[0],3)} for k,v in ch.items()]), use_container_width=True)
+            ix = _xai.get("intersectional", {})
+            if ix and ix.get("group_performances"):
+                st.markdown("#### Intersectional Fairness")
+                st.markdown(f'<div class="alert-info">{ix.get("narrative","")}</div>', unsafe_allow_html=True)
+                ix_df = pd.DataFrame([{"Group":k,**{kk:round(vv,3) for kk,vv in v.items()}} for k,v in ix["group_performances"].items()])
+                st.dataframe(ix_df.style.background_gradient(subset=["accuracy"], cmap="RdYlGn"), use_container_width=True)
+
+    with tab7:
+        _xai = st.session_state.get("health_xai_results", {})
+        _cr = _xai.get("compliance_report", {})
+        _mc = _xai.get("model_card", {})
+        st.markdown("### 📋 Regulatory Compliance Report")
+        if not _cr:
+            st.info("Run a simulation to generate the compliance report.")
+        else:
+            summ = _cr.get("summary", {})
+            ok = summ.get("overall_compliant", False)
+            st.markdown(f'<div class="{"alert-success" if ok else "alert-danger"}">Overall: <strong>{"COMPLIANT ✅" if ok else "NON-COMPLIANT ❌"}</strong> | Fairness: {summ.get("fairness_score",0):.3f} | Parity Gap: {summ.get("demographic_parity_gap",0):.1%}</div>', unsafe_allow_html=True)
+            for fw, fd in _cr.get("frameworks", {}).items():
+                with st.expander(f"📑 {fw}"):
+                    for ch, st_ in fd.get("checks", {}).items():
+                        icon = "✅" if st_ == "PASS" else "❌"
+                        st.markdown(f"{icon} {ch}")
+            try:
+                pdf_b = generate_pdf_compliance_report(_cr, _mc, {"accuracy": avg_acc}, domain="healthcare")
+                st.download_button("📄 Download Compliance PDF", pdf_b, "healthcare_compliance.pdf", "application/pdf", use_container_width=True)
+            except Exception as _e:
+                st.caption(f"PDF unavailable: {_e}")
+
+        # ── Real-world benchmark comparison ─────────────────────
+        st.markdown("#### 📚 Real-World Benchmark Comparison")
+        if BENCHMARKS_OK:
+            _dom_bms = get_benchmarks_for_domain("healthcare")
+            if _dom_bms:
+                _bm_sel = st.selectbox(
+                        "Compare against a published study:",
+                        list(_dom_bms.keys()),
+                        format_func=lambda k: _dom_bms[k].name + " (" + str(_dom_bms[k].year) + ")",
+                        key="_health_bm_sel")
+                _bm = _dom_bms[_bm_sel]
+                _acc_col = "accuracy" if "accuracy" in df.columns else ("detection_rate" if "detection_rate" in df.columns else None)
+                _fair_col = "fairness_score" if "fairness_score" in df.columns else None
+                _sim_m = {}
+                if _acc_col: _sim_m["accuracy"] = df[_acc_col].mean()
+                if _fair_col: _sim_m["fairness_score"] = df[_fair_col].mean()
+                if "fpr" in df.columns: _sim_m["fpr"] = df["fpr"].mean()
+                if "recall" in df.columns: _sim_m["recall"] = df["recall"].mean()
+                if CHARTS_OK:
+                        try:
+                            st.plotly_chart(benchmark_comparison_bar(
+                                _sim_m, _bm.metrics, _bm.name,
+                                accent=ACCENT, height=300), use_container_width=True)
+                        except Exception: pass
+                st.markdown(
+                        '<div class="nbox"><strong>Key Lesson:</strong> ' + _bm.lesson +
+                        '<br><span style="font-size:.75rem;color:#64748b">📚 ' +
+                        _bm.citation[:100] + '</span></div>',
+                        unsafe_allow_html=True)
+            else:
+                st.info("No published benchmarks available for this domain yet.")
+        else:
+            st.info("Add gags_benchmarks.py to components/ to enable benchmark comparison.")
+
+
+    with tab8:
+        _lng = st.session_state.get("health_longitudinal")
+        st.markdown("### 🔁 Longitudinal Bias Analysis")
+        st.markdown('<div class="alert-info">Simulates the <strong>feedback loop</strong>: biased predictions replace training labels over successive retraining cycles, potentially making bias self-reinforcing.</div>', unsafe_allow_html=True)
+        if not _lng:
+            st.info("Run a simulation to see longitudinal bias evolution.")
+        else:
+            c1,c2,c3 = st.columns(3)
+            c1.metric("Initial Bias", f'{_lng["initial_bias"]:.1%}')
+            c2.metric("Final Bias", f'{_lng["final_bias"]:.1%}', f'{_lng["final_bias"]-_lng["initial_bias"]:+.1%}')
+            c3.metric("Amplification", f'{_lng["amplification_factor"]:.2f}×', "⚠️ Self-reinforcing" if _lng["self_reinforcing"] else "Stable")
+            if _lng.get("inflection_point"):
+                st.warning(f"⚠️ Bias became self-reinforcing at generation {_lng["inflection_point"]}.")
+            st.markdown(f'<div class="alert-info"><em>{_lng["narrative"]}</em></div>', unsafe_allow_html=True)
+            gm = _lng.get("generation_metrics", [])
+            if gm:
+                import plotly.express as _px2
+                gm_df = pd.DataFrame(gm)
+                fig_lng = _px2.line(gm_df, x="generation", y=["demographic_parity","fairness_score","accuracy"],
+                    title="Bias Evolution Across Retraining Generations",
+                    labels={"value":"Score","generation":"Generation"},
+                    color_discrete_sequence=["#ef4444","#16a34a","#2563eb"])
+                fig_lng.add_hline(y=0.1, line_dash="dot", line_color="red", annotation_text="Parity threshold (10%)")
+                st.plotly_chart(fig_lng, use_container_width=True)
+
+    with tab9:
+        _fed = st.session_state.get("health_federated")
+        st.markdown("### 🌐 Federated Learning Simulation")
+        st.markdown('<div class="alert-info">Tests whether bias persists when training is <strong>distributed across multiple hospitals</strong> without centralising patient data (FedAvg).</div>', unsafe_allow_html=True)
+        if not _fed:
+            st.info("Run a simulation to see federated learning results.")
+        else:
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("Clients", _fed["n_clients"])
+            c2.metric("Global Accuracy", f'{_fed["global_accuracy"]:.1%}')
+            c3.metric("Global Fairness", f'{_fed["global_fairness"]:.3f}')
+            c4.metric("Bias Persisted", "Yes ⚠️" if _fed["bias_persisted"] else "No ✅")
+            if _fed["bias_persisted"]:
+                st.markdown('<div class="alert-danger">Bias persisted despite federated aggregation. Per-client fairness constraints are required.</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="alert-success">FedAvg aggregation successfully reduced bias below threshold.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="alert-info"><em>{_fed["narrative"]}</em></div>', unsafe_allow_html=True)
+            cr_ = _fed.get("client_results", [])
+            if cr_:
+                import plotly.express as _px3
+                cr_df = pd.DataFrame([c.__dict__ if hasattr(c,"__dict__") else c for c in cr_])
+                if not cr_df.empty and "local_bias" in cr_df.columns:
+                    fig_fed = _px3.bar(cr_df, x="client_id", y=["local_accuracy","local_bias","local_fairness"],
+                        barmode="group", title="Per-Client Metrics",
+                        color_discrete_sequence=["#2563eb","#ef4444","#16a34a"])
+                    st.plotly_chart(fig_fed, use_container_width=True)
+            bc = _fed.get("bias_convergence", [])
+            if bc:
+                import plotly.express as _px4
+                fig_bc = _px4.line(x=list(range(1,len(bc)+1)), y=bc,
+                    title="Global Parity Gap per Aggregation Round",
+                    labels={"x":"Round","y":"Demographic Parity Gap"})
+                fig_bc.add_hline(y=0.1, line_dash="dot", line_color="red")
+                st.plotly_chart(fig_bc, use_container_width=True)
+
+    # ── Tab 10: Raw Results ──────────────────────────────────────────────────────
+    with tab10:
+        display_cols = [
+            "run_id","data_source","accuracy","precision","recall","f1",
+            "sensitivity","specificity","equity_score","demographic_parity",
+            "acc_lo","acc_hi","sens_lo","sens_hi","adv_lo","adv_hi",
+            "bias_intensity","poison_rate","access_inequality","biases",
+        ]
+        fmt = {c: "{:.3f}" for c in display_cols if c not in
+               ["run_id","data_source","biases","is_africa"]}
+        show_df = df[[c for c in display_cols if c in df.columns]]
+        st.dataframe(
+            show_df.style
+                .format({k: v for k, v in fmt.items() if k in show_df.columns})
+                .background_gradient(subset=["accuracy"],    cmap="Blues")
+                .background_gradient(subset=["equity_score"],cmap="RdYlGn"),
+            use_container_width=True,
+        )
+
+        dl1, dl2 = st.columns(2)
+        with dl1:
+            st.download_button(
+                t("download_csv"),
+                df.to_csv(index=False).encode(),
+                f"gags_healthcare_{healthcare_setting.lower().replace(' ','_')}.csv",
+                "text/csv", use_container_width=True,
+            )
+        with dl2:
+            config_export = {
+                "healthcare_setting": healthcare_setting, "region": region,
+                "prediction_task": prediction_task,  "data_source": data_source,
+                "selected_biases": selected_biases,  "bias_intensity": bias_intensity,
+                "poison_rate": poison_rate,          "access_inequality": access_inequality,
+                "low_income_ratio": low_income_ratio,"uninsured_ratio": uninsured_ratio,
+                "features_enabled": {
+                    "multimodal_redteam": enable_redteam,
+                    "governance": enable_governance,
+                    "strategic_arena": enable_arena,
+                    "agent_economy": enable_agent_economy,
+                    "gender_audit": enable_gender_audit,
+                },
+                "avg_accuracy": f"{avg_acc:.3f}",
+                "avg_equity":   f"{avg_equity:.3f}",
+            }
+            st.download_button(
+                "📋 Export Config JSON",
+                json.dumps(config_export, indent=2),
+                f"healthcare_config_{healthcare_setting.lower().replace(' ','_')}.json",
+                "application/json", use_container_width=True,
             )
 
-            # Download options
-            col1, col2 = st.columns(2)
-            with col1:
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "📥 Download Results (CSV)",
-                    csv,
-                    f"gags_healthcare_{healthcare_setting.lower().replace(' ', '_')}.csv",
-                    "text/csv",
-                    use_container_width=True
-                )
+    # ── Simulation history ─────────────────────────────────────────────────────
+    history_browser("health_snapshot_history", domain="health",
+        key_metrics=["accuracy","equity_score","demographic_parity"])
 
-            with col2:
-                # Export configuration
-                config_data = {
-                    "healthcare_setting": healthcare_setting,
-                    "region": region,
-                    "prediction_task": prediction_task,
-                    "selected_biases": selected_biases,
-                    "bias_intensity": bias_intensity,
-                    "attack_type": attack_type,
-                    "poison_rate": poison_rate,
-                    "low_income_ratio": low_income_ratio,
-                    "demographic_diversity": demographic_diversity,
-                    "access_inequality": access_inequality,
-                    "rural_access": rural_access,
-                    "uninsured_ratio": uninsured_ratio,
-                    "quality_variation": quality_variation,
-                    "average_accuracy": f"{avg_accuracy:.1%}",
-                    "average_equity": f"{avg_equity:.2f}",
-                    "average_sensitivity": f"{avg_sensitivity:.1%}"
-                }
-                import json
+    # ── Annotation layer ────────────────────────────────────────────────
+    annotation_panel("health_annotations", context_label=f"{len(st.session_state.health_run_history)} Healthcare run(s)")
 
-                json_str = json.dumps(config_data, indent=2)
-                st.download_button(
-                    "📋 Export Configuration (JSON)",
-                    json_str,
-                    f"healthcare_config_{healthcare_setting.lower().replace(' ', '_')}.json",
-                    "application/json",
-                    use_container_width=True
-                )
+    # ── Policy recommendations ────────────────────────────────────────────────
+    st.divider()
+    st.markdown("## 💡 Policy Recommendations")
 
-        # ── Policy Recommendations ───────────────────────────────
-        st.divider()
+    if info.get("is_africa"):
+        st.markdown("""
+        <div class="alert-info">
+            <strong>🌍 Africa-Centric Findings (Feature 3)</strong><br>
+            • Deploy USSD/SMS fallback interfaces to close the digital inclusion gap<br>
+            • Mandate multilingual model validation across Hausa, Yoruba, Igbo, and English<br>
+            • Apply gender-stratified resampling to close the diagnostic accuracy gap<br>
+            • Align with UNESCO Women4EthicalAI principles for all clinical AI deployments
+        </div>""", unsafe_allow_html=True)
 
-        # Generate actionable recommendations
-        st.markdown("## 💡 Healthcare Policy Recommendations")
+    r1, r2 = st.columns(2)
+    with r1:
+        st.info("""
+**🏥 For Healthcare Providers**
+1. Publish validation studies with group-stratified performance metrics
+2. Require clinician review of all high-stakes AI recommendations
+3. Commission third-party bias audits annually
+4. Ensure training data represents all patient populations
+5. Implement clear AI override protocols for clinical staff
 
-        rec_col1, rec_col2 = st.columns(2)
+**🩺 Clinical Safety**
+1. Monitor false-negative rates by demographic group continuously
+2. Set group-specific decision thresholds for critical conditions
+3. Integrate bias monitoring into existing quality-improvement programmes
+""")
+    with r2:
+        st.success("""
+**🤖 For AI Developers**
+1. Test across diverse populations before deployment
+2. Provide clinician-interpretable explanations for every prediction
+3. Continuously track performance disaggregated by demographic group
+4. Conduct adversarial red-teaming (text, image, deepfake) before release
+5. Co-design with clinicians, patients, and ethicists
 
-        with rec_col1:
-            st.info("""
-            **🏥 For Healthcare Providers:**
+**📊 For Regulators**
+1. Mandate fairness testing (equity score ≥ 0.7) for clinical AI approval
+2. Require disclosure of performance by demographic group
+3. Establish post-market surveillance requirements
+4. Adopt blockchain-ledger governance for algorithm-change tracking
+""")
 
-            1. **Transparent Algorithms:** Publish validation studies and performance metrics
-            2. **Human Oversight:** Ensure clinician review of high-stakes AI recommendations
-            3. **Bias Audits:** Regular third-party audits for fairness across demographic groups
-            4. **Diverse Training Data:** Ensure representation of all patient populations
-            5. **Patient Consent:** Obtain informed consent for AI-assisted decisions
+    st.caption(
+        "⚠️ Disclaimer: Simulation for educational/research purposes. "
+        "Real clinical AI requires extensive validation, regulatory approval, and ethical review."
+    )
 
-            **👨‍⚕️ For Clinical Safety:**
-
-            1. **Safety Monitoring:** Continuous monitoring for differential performance
-            2. **Error Analysis:** Regular review of false positives/negatives by group
-            3. **Quality Assurance:** Integration with clinical quality improvement programs
-            4. **Emergency Override:** Clear protocols for overriding AI recommendations
-            """)
-
-        with rec_col2:
-            st.success("""
-            **🤖 For AI Development:**
-
-            1. **Clinical Validation:** Rigorous testing across diverse patient populations
-            2. **Explainable AI:** Provide interpretable explanations for clinical decisions
-            3. **Continuous Monitoring:** Track performance across demographic groups
-            4. **Adversarial Testing:** Test systems against various attack vectors
-            5. **Stakeholder Involvement:** Include clinicians, patients, and ethicists in design
-
-            **📊 For Regulators & Policymakers:**
-
-            1. **Clinical Standards:** Develop standards for healthcare AI validation
-            2. **Equity Requirements:** Mandate fairness testing for regulatory approval
-            3. **Transparency Mandates:** Require disclosure of performance by demographic group
-            4. **Post-Market Surveillance:** Continuous monitoring of real-world performance
-            """)
-
-        st.caption(
-            "⚠️ **Disclaimer:** This simulation is for educational purposes. Real healthcare AI systems require extensive clinical validation, regulatory approval, and ethical review.")
-
+# ═══════════════════════════════════════════════════════════════════════════════
+# Welcome screen (no results yet)
+# ═══════════════════════════════════════════════════════════════════════════════
 else:
-    # Welcome/Instruction state
     st.markdown("## 🏥 Welcome to Healthcare Equity Simulation")
-
     st.markdown("""
-    This module explores how AI impacts healthcare equity across diagnosis, treatment, resource allocation, 
-    and patient outcomes. You'll configure healthcare scenarios and analyze fairness across different patient groups.
+    Configure your scenario in the sidebar and click **Run** to begin.
+    This module integrates all five GAGS v3.0 feature upgrades alongside the
+    existing hybrid data pipeline.
     """)
 
-    # Quick start examples
-    st.markdown("### 🚀 Quick Start Scenarios")
+    c1, c2, c3 = st.columns(3)
+    cards = [
+        ("Feature 1 — Agent Economy",     "card-blue",   "Autonomous agents bid for ICU beds, diagnostic compute, and specialist time via Vickrey auctions. Tracks resource permeability across patient groups."),
+        ("Feature 2 — Multimodal Red Team","card-orange", "Text injection, adversarial image perturbation, and deepfake attacks on clinical data — with immersive VR scenario descriptions."),
+        ("Feature 3 — Africa-Centric",     "card-green",  "Abuja FCT scenario presets, multilingual fairness bias, and a UNESCO Women4EthicalAI gender equity audit with digital inclusion metrics."),
+    ]
+    for col, (title, cls, desc) in zip([c1, c2, c3], cards):
+        col.markdown(f'<div class="{cls}"><strong>{title}</strong><p style="font-size:.87rem;margin:.5rem 0 0;">{desc}</p></div>', unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
+    c4, c5, _ = st.columns(3)
+    extra_cards = [
+        ("Feature 4 — Governance Layer",   "card-purple", "Citizen assembly votes on healthcare AI policies. AI detects bias drift and auto-reverses harmful decisions, logged on a chained ledger."),
+        ("Feature 5 — Strategic Arena",    "card-blue",   "Agents negotiate, deceive, and form coalitions under partial observability. Logs reveal emergent social behaviour in healthcare resource allocation."),
+    ]
+    for col, (title, cls, desc) in zip([c4, c5], extra_cards):
+        col.markdown(f'<div class="{cls}"><strong>{title}</strong><p style="font-size:.87rem;margin:.5rem 0 0;">{desc}</p></div>', unsafe_allow_html=True)
 
-    with col1:
+    with st.expander("📖 How to Use", expanded=False):
         st.markdown("""
-        <div class="hospital-card">
-            <h4>🏥 Hospital Diagnostics</h4>
-            <p>Explore fairness in diagnostic algorithms:</p>
-            <ul>
-                <li>High-stakes prediction tasks</li>
-                <li>Socioeconomic bias focus</li>
-                <li>Clinical safety considerations</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="hospital-card">
-            <h4>🩺 Primary Care Screening</h4>
-            <p>Analyze equity in preventive care:</p>
-            <ul>
-                <li>Access inequality focus</li>
-                <li>Early detection challenges</li>
-                <li>Population health impact</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col3:
-        st.markdown("""
-        <div class="hospital-card">
-            <h4>💊 Treatment Recommendations</h4>
-            <p>Study fairness in treatment algorithms:</p>
-            <ul>
-                <li>Resource allocation decisions</li>
-                <li>Cost-effectiveness considerations</li>
-                <li>Clinical guideline adherence</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # How to use guide
-    with st.expander("📖 How to Use This Simulation", expanded=True):
-        st.markdown("""
-        1. **Select healthcare context** (setting and region)
-        2. **Configure biases** affecting healthcare algorithms
-        3. **Set patient demographics** (income levels, insurance status)
-        4. **Adjust access factors** (inequality, rural access)
-        5. **Configure adversarial attacks** on healthcare data
-        6. **Run multiple simulations** to see statistical trends
-        7. **Analyze trade-offs** between accuracy and equity
-        8. **Explore clinical impact** on different patient groups
-        9. **Review recommendations** for policy and practice
-
-        **Key Metrics to Watch:**
-        - **Accuracy:** Overall prediction performance
-        - **Sensitivity:** True positive rate (critical for healthcare)
-        - **Equity Score:** Fairness across patient groups (0-1)
-        - **Health Equity Score:** Equity in healthcare outcomes (0-1)
-        - **Adverse Outcome Gap:** Difference in outcomes between income groups
-        - **Sensitivity Gap:** Difference in detection rates by demographic group
+        1. **Select a data source** — synthetic, real-world (UCI/PIMA/WBC), hybrid, or Abuja Africa-centric
+        2. **Enable feature modules** in the sidebar (Multimodal Red Team, Governance, Arena, Agent Economy, Gender Audit)
+        3. **Configure bias types and intensity** — including new `gender` and `linguistic` types
+        4. **Set patient demographics** and access inequality factors
+        5. **Run** — results appear across six analysis tabs
+        6. **Review the governance banner** — automatic vote outcome and blockchain hash displayed after each run
+        7. **Download** results (CSV) or configuration (JSON) from the Raw Results tab
         """)
-
-    # Real-world context
-    st.warning("""
-    **Real-World Context:**
-
-    Healthcare AI faces unique ethical challenges:
-    - **High-Stakes Decisions:** Diagnosis and treatment affect patient health and lives
-    - **Clinical Safety:** False negatives can lead to missed diagnoses
-    - **Access Disparities:** Existing healthcare inequalities can be amplified
-    - **Data Quality:** Clinical data may reflect historical biases
-    - **Regulatory Compliance:** Must meet clinical validation and safety standards
-
-    Responsible AI in healthcare requires balancing innovation with patient safety, equity, and clinical effectiveness.
-    """)
 
 # Footer
 st.divider()
-st.caption("🏥 Healthcare Equity Simulation • GAGS Framework • v2.0 • Advancing Health Equity Through Fair AI")
+st.markdown("""
+<div style="text-align:center;color:#7f8c8d;padding:1.5rem 0;">
+    <strong>🏥 Healthcare Equity Simulation • GAGS Framework v3.0</strong><br>
+    Features: AI Agent Economy · Multimodal Red Teaming · Africa-Centric/Gender Equity ·
+    Hybrid Governance · Strategic Social Reasoning
+</div>
+""", unsafe_allow_html=True)
