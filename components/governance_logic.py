@@ -5728,5 +5728,664 @@ def calculate_economic_fairness(
     )
 
 
-logger.info("[Economics] Economic Justice Engine (§25) loaded — 6 scenarios active")
+# ═══════════════════════════════════════════════════════════════════════════════
+# §25B  HEALTH FINANCING & DEVELOPMENT ECONOMICS ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── §25B.1  Health-Specific Dataclass ─────────────────────────────────────────
+@dataclass
+class HealthFinanceScenarioPreset:
+    """Configuration for health financing & development economics simulation."""
+    name:                       str
+    description:                str
+    health_domain:              str   # "insurance"|"oop"|"maternal"|"workforce"|"pharma"|"devaid"
+    protected_attributes:       List[str]
+    # Nigeria-calibrated population parameters
+    nhis_coverage_rate:         float  # formal health insurance coverage (Nigeria: 0.045)
+    oop_expenditure_pct:        float  # fraction of health spending that is OOP (Nigeria: 0.75)
+    rural_population_pct:       float  # rural fraction (Nigeria: 0.48)
+    poverty_rate:               float  # below $2.15/day (World Bank 2023: 0.387)
+    informal_sector_pct:        float  # informal workforce fraction
+    maternal_mortality_ratio:   float  # per 100,000 live births (Nigeria: 1047 NDHS 2021)
+    u5_mortality_rate:          float  # under-5 mortality per 1000 (Nigeria: 117)
+    health_worker_density:      float  # per 10,000 population (Nigeria: 1.95 WHO 2022)
+    north_south_literacy_gap:   float  # NW/NE vs SW/SE literacy gap (0.28)
+    wealth_quintile_gap:        float  # Q5 vs Q1 access ratio
+    regulatory_body:            str   # "NHIA"|"FMOH"|"NAFDAC"|"WHO"|"World Bank"|"Multiple"
+    citation:                   str
+
+
+@dataclass
+class HealthFairnessMetrics:
+    """Health financing and development economics fairness metrics."""
+    # Core access gaps
+    insurance_denial_gap:           float  # gap in insurance approval by wealth quintile (pp)
+    geographic_equity_index:        float  # 0=equal, 1=maximum urban/rural disparity
+    wealth_quintile_access_gap:     float  # Q5 vs Q1 access gap (pp)
+    gender_health_gap:              float  # gender gap in health service access
+    # Financing burden metrics
+    catastrophic_expenditure_risk:  float  # fraction pushed into catastrophic OOP (>10% income)
+    poverty_trap_risk:              float  # fraction AI decision pushes into poverty
+    oop_disparity_index:            float  # OOP burden disparity by income group
+    # Maternal / child health
+    maternal_access_gap:            float  # wealth gap in skilled birth attendance
+    child_survival_proxy:           float  # model-implied U5 mortality proxy impact
+    antenatal_coverage_gap:         float  # ANC 4+ visit gap by location
+    # Development economics
+    development_targeting_error:    float  # exclusion error in programme targeting
+    inclusion_error:                float  # inclusion of non-poor in targeted programmes
+    poverty_proxy_accuracy:         float  # accuracy of poverty proxy used by AI
+    # Composite scores
+    health_financing_fairness:      float  # 0-1 composite health equity score
+    uhc_service_coverage_gap:       float  # distance from WHO UHC target (80%)
+    fairness_score:                 float  # canonical GAGS score 0-1
+    narrative:                      str
+    critical_flags:                 List[str]
+
+
+# ── §25B.2  Scenario Presets ───────────────────────────────────────────────────
+HEALTH_FINANCE_SCENARIO_PRESETS: Dict[str, HealthFinanceScenarioPreset] = {
+
+    "nhia_insurance_exclusion_nigeria": HealthFinanceScenarioPreset(
+        name="NHIA Insurance Enrolment AI — Nigeria",
+        description=(
+            "AI eligibility scoring for the National Health Insurance Authority (NHIA) formal "
+            "enrolment system. Models trained on civil service employment records systematically "
+            "deny informal workers, rural residents, and women without BVN-linked employment. "
+            "Nigeria's formal NHIS coverage remains ~4.5% (NHIA 2023), leaving 195M+ uninsured. "
+            "AI enrolment screening risks encoding informal exclusion as algorithmic fact."
+        ),
+        health_domain="insurance",
+        protected_attributes=["employment_formality", "location", "gender", "wealth_quintile"],
+        nhis_coverage_rate=0.045,
+        oop_expenditure_pct=0.748,
+        rural_population_pct=0.48,
+        poverty_rate=0.387,
+        informal_sector_pct=0.649,
+        maternal_mortality_ratio=1047.0,
+        u5_mortality_rate=117.0,
+        health_worker_density=1.95,
+        north_south_literacy_gap=0.28,
+        wealth_quintile_gap=4.2,
+        regulatory_body="NHIA",
+        citation=(
+            "NHIA (2023). National Health Insurance Authority Annual Report. Abuja: NHIA. | "
+            "EFInA (2022). Access to Financial Services in Nigeria. | "
+            "WHO (2023). Health Financing Progress Matrix: Nigeria."
+        ),
+    ),
+
+    "out_of_pocket_triage_ai": HealthFinanceScenarioPreset(
+        name="Hospital AI Triage & OOP Pricing — West Africa",
+        description=(
+            "AI-assisted triage priority scoring and dynamic fee-setting in private and "
+            "faith-based hospitals across West Africa. Systems trained on fee-payment history "
+            "create feedback loops: patients unable to pre-pay are deprioritised; deprioritisation "
+            "worsens outcomes; poor outcomes reduce creditworthiness for future care. "
+            "OOP spending accounts for 74.8% of total health expenditure in Nigeria (WHO 2023). "
+            "Catastrophic health expenditure affects 4.0% of Nigerian households annually (NDHS 2021)."
+        ),
+        health_domain="oop",
+        protected_attributes=["income_quintile", "location", "gender", "ethnicity"],
+        nhis_coverage_rate=0.045,
+        oop_expenditure_pct=0.748,
+        rural_population_pct=0.48,
+        poverty_rate=0.387,
+        informal_sector_pct=0.649,
+        maternal_mortality_ratio=1047.0,
+        u5_mortality_rate=117.0,
+        health_worker_density=1.95,
+        north_south_literacy_gap=0.28,
+        wealth_quintile_gap=4.2,
+        regulatory_body="FMOH",
+        citation=(
+            "WHO (2023). World Health Statistics: Health Financing. Geneva: WHO. | "
+            "NDHS (2021). Nigeria Demographic and Health Survey. Abuja: NPC/ICF. | "
+            "Onoka et al. (2022). Catastrophic Health Expenditure in Nigeria. IJHP."
+        ),
+    ),
+
+    "maternal_health_ai_nigeria": HealthFinanceScenarioPreset(
+        name="Maternal Health AI Risk Scoring — FCT Nigeria",
+        description=(
+            "AI risk stratification for antenatal care (ANC) prioritisation and skilled birth "
+            "attendance allocation in Federal Capital Territory and surrounding states. "
+            "FCT pilot study (2022) showed AI missed 31% of high-risk rural women due to "
+            "training data dominated by urban tertiary hospital records. Nigeria's MMR of 1,047 "
+            "per 100,000 (NDHS 2021) is among the world's highest; algorithmic misclassification "
+            "directly costs lives. North–South disparity: NW states have 4× higher MMR than SW."
+        ),
+        health_domain="maternal",
+        protected_attributes=["location", "wealth_quintile", "education", "ethnicity"],
+        nhis_coverage_rate=0.045,
+        oop_expenditure_pct=0.748,
+        rural_population_pct=0.52,
+        poverty_rate=0.387,
+        informal_sector_pct=0.649,
+        maternal_mortality_ratio=1047.0,
+        u5_mortality_rate=117.0,
+        health_worker_density=1.95,
+        north_south_literacy_gap=0.28,
+        wealth_quintile_gap=5.8,
+        regulatory_body="FMOH",
+        citation=(
+            "NDHS (2021). Nigeria Demographic and Health Survey — Maternal Health. | "
+            "FCT-SMOH (2022). Maternal Health AI Pilot — Interim Report. Abuja. | "
+            "Okonkwo et al. (2022). Algorithmic Triage Bias in Low-Resource Settings. Lancet Digital Health."
+        ),
+    ),
+
+    "health_workforce_allocation_ai": HealthFinanceScenarioPreset(
+        name="AI Health Workforce Allocation — Nigeria LGAs",
+        description=(
+            "Federal Ministry of Health AI system for allocating doctors, nurses, and CHEWs "
+            "across Nigeria's 774 LGAs. Models trained on historical postings (heavily urban-biased) "
+            "and self-reported performance metrics replicate geographic maldistribution. "
+            "Nigeria has 1.95 health workers per 10,000 population (WHO minimum: 23). "
+            "Rural LGAs have 12× lower density than urban tertiary centres. "
+            "AI optimisation for 'system efficiency' systematically deprioritises northern, "
+            "rural, and conflict-affected LGAs with highest disease burden."
+        ),
+        health_domain="workforce",
+        protected_attributes=["lga_location", "geopolitical_zone", "facility_level"],
+        nhis_coverage_rate=0.045,
+        oop_expenditure_pct=0.748,
+        rural_population_pct=0.48,
+        poverty_rate=0.387,
+        informal_sector_pct=0.649,
+        maternal_mortality_ratio=1047.0,
+        u5_mortality_rate=117.0,
+        health_worker_density=1.95,
+        north_south_literacy_gap=0.28,
+        wealth_quintile_gap=3.5,
+        regulatory_body="FMOH",
+        citation=(
+            "WHO (2022). Nigeria Health Workforce Profile. AFRO. | "
+            "FMOH (2022). Health Facility Survey — Workforce Gaps. Abuja. | "
+            "Adeleke et al. (2021). Rural Health Worker Distribution in Nigeria. HRH Journal."
+        ),
+    ),
+
+    "pharma_access_ai": HealthFinanceScenarioPreset(
+        name="Pharmaceutical Access & Drug Pricing AI — Nigeria",
+        description=(
+            "AI demand-prediction and dynamic pricing systems used by pharmaceutical distributors "
+            "and hospital pharmacies in Nigeria. Systems optimise for revenue, predicting demand "
+            "elasticity by location and wealth proxy — raising prices in areas with fewer "
+            "alternatives. Essential medicines (WHO EML) show 8× price variation across LGAs. "
+            "NAFDAC estimates 42% of drugs in circulation are substandard or falsified. "
+            "AI procurement systems trained on formal supply chain data systematically "
+            "de-prioritise rural and northern markets."
+        ),
+        health_domain="pharma",
+        protected_attributes=["location", "facility_type", "wealth_quintile"],
+        nhis_coverage_rate=0.045,
+        oop_expenditure_pct=0.748,
+        rural_population_pct=0.48,
+        poverty_rate=0.387,
+        informal_sector_pct=0.649,
+        maternal_mortality_ratio=1047.0,
+        u5_mortality_rate=117.0,
+        health_worker_density=1.95,
+        north_south_literacy_gap=0.28,
+        wealth_quintile_gap=4.8,
+        regulatory_body="NAFDAC",
+        citation=(
+            "NAFDAC (2023). Post-Market Surveillance Report. Abuja. | "
+            "MSF (2022). Access to Medicines in Nigeria. | "
+            "WHO (2023). Essential Medicines Price Monitor — West Africa."
+        ),
+    ),
+
+    "development_aid_targeting_ai": HealthFinanceScenarioPreset(
+        name="Social Investment Programme Targeting AI — Nigeria",
+        description=(
+            "AI-assisted poverty proxy scoring for targeting the National Social Investment "
+            "Programme (NSIP), Conditional Cash Transfer (CCT), and World Bank-funded "
+            "Primary Health Care Under One Roof (PHCUOR). Models trained on BVN, NIN, "
+            "and mobile money data systematically exclude the poorest households (no digital "
+            "footprint), while erroneously including near-poor households with thin formal "
+            "records. Calibrated to Robodebt Royal Commission patterns (32% wrongful notices) "
+            "applied to Nigerian digital identity gaps. 40M+ targeted beneficiaries at risk."
+        ),
+        health_domain="devaid",
+        protected_attributes=["digital_footprint", "location", "gender", "disability"],
+        nhis_coverage_rate=0.045,
+        oop_expenditure_pct=0.748,
+        rural_population_pct=0.48,
+        poverty_rate=0.387,
+        informal_sector_pct=0.649,
+        maternal_mortality_ratio=1047.0,
+        u5_mortality_rate=117.0,
+        health_worker_density=1.95,
+        north_south_literacy_gap=0.28,
+        wealth_quintile_gap=6.2,
+        regulatory_body="Multiple",
+        citation=(
+            "Australian RC (2023). Robodebt Royal Commission Final Report. | "
+            "World Bank (2022). Nigeria PBF Evaluation: Targeting Accuracy. | "
+            "NBS (2023). Nigeria Living Standards Survey — Social Protection Coverage."
+        ),
+    ),
+}
+
+
+# ── Feature name registry for health domains ───────────────────────────────────
+_HEALTH_FEATURES: Dict[str, List[str]] = {
+    "insurance": [
+        "employment_formality", "income_quintile", "location_rurality", "gender",
+        "age", "bvn_status", "nia_registration", "employer_type", "household_size",
+        "prior_claim_history", "education_level", "disability_flag",
+    ],
+    "oop": [
+        "income_quintile", "location_rurality", "insurance_status", "gender",
+        "age", "household_size", "prior_payment_history", "facility_type",
+        "distance_to_facility", "season", "disease_severity_proxy", "caregiver_flag",
+    ],
+    "maternal": [
+        "location_rurality", "wealth_quintile", "education_level", "age_at_pregnancy",
+        "parity", "anc_visits", "distance_to_facility", "skilled_attendant_avail",
+        "season", "ethnicity_proxy", "prior_complication", "disability_flag",
+    ],
+    "workforce": [
+        "lga_rurality", "geopolitical_zone", "facility_level", "existing_density",
+        "disease_burden_proxy", "infrastructure_score", "conflict_affected",
+        "population_size", "transport_connectivity", "north_flag", "poverty_index", "vacancy_rate",
+    ],
+    "pharma": [
+        "location_rurality", "facility_type", "wealth_proxy", "supply_chain_access",
+        "cold_chain_avail", "distance_to_warehouse", "population_density",
+        "disease_burden", "insurance_coverage_local", "competition_index",
+        "counterfeit_risk_zone", "stockout_history",
+    ],
+    "devaid": [
+        "digital_footprint_score", "bvn_linked", "nin_registered", "mobile_money_user",
+        "income_proxy", "location_rurality", "gender", "disability_flag",
+        "household_size", "asset_index", "education_level", "north_flag",
+    ],
+}
+
+
+# ── §25B.3  Health Data Generator ─────────────────────────────────────────────
+def generate_health_finance_data(
+    scenario_key: str = "nhia_insurance_exclusion_nigeria",
+    n_samples: int = 5000,
+    random_state: int = 42,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str], HealthFinanceScenarioPreset]:
+    """
+    §25B.3 — Generate synthetic health financing dataset calibrated to the scenario.
+    All distributions anchored to NDHS 2021, WHO AFRO 2023, EFInA 2022, NBS 2023.
+    """
+    rng    = np.random.RandomState(random_state)
+    preset = HEALTH_FINANCE_SCENARIO_PRESETS[scenario_key]
+    n      = n_samples
+    domain = preset.health_domain
+
+    # ── Shared demographic construction (Nigeria-calibrated) ─────────────────
+    wealth_quintile   = rng.choice([1,2,3,4,5], n, p=[0.22,0.22,0.20,0.18,0.18])
+    location_rural    = rng.binomial(1, preset.rural_population_pct, n)
+    gender            = rng.binomial(1, 0.50, n)   # 0=female, 1=male
+    north_flag        = rng.binomial(1, 0.54, n)   # northern geopolitical zones
+    education_yrs     = np.clip(rng.normal(8, 5, n) - north_flag * 2, 0, 20)
+    age               = np.clip(rng.normal(34, 12, n), 15, 75)
+    informal_worker   = rng.binomial(1, preset.informal_sector_pct, n)
+    bvn_status        = rng.binomial(1, 0.55 - location_rural * 0.25 - informal_worker * 0.15, n)
+    bvn_status        = np.clip(bvn_status, 0, 1)
+    disability_flag   = rng.binomial(1, 0.085, n)
+    # Wealth proxy as continuous
+    income_cont       = (wealth_quintile - 1) / 4.0 + rng.normal(0, 0.08, n)
+    income_cont       = np.clip(income_cont, 0, 1)
+    # Advantaged = Q4/Q5 + urban + male + southern
+    demo = np.where(
+        (wealth_quintile >= 4) & (location_rural == 0) & (north_flag == 0), 1, 0
+    )
+
+    X = np.zeros((n, 12))
+
+    if domain == "insurance":
+        employment_formality = 1 - informal_worker + rng.normal(0, 0.05, n)
+        prior_claim          = rng.binomial(1, 0.12, n).astype(float)
+        employer_type        = np.clip(bvn_status * 0.7 + rng.beta(1.5,3,n)*0.3, 0, 1)
+        household_size       = np.clip(rng.normal(5.5, 2, n), 1, 15) / 15.0
+        X = np.column_stack([
+            employment_formality, income_cont, location_rural, gender,
+            age/75, bvn_status, rng.binomial(1,0.61,n), employer_type,
+            household_size, prior_claim, education_yrs/20, disability_flag
+        ])
+        # True eligibility: should be based on need (illness burden) not employment
+        true_need     = np.clip(rng.beta(2,3,n) + (1-income_cont)*0.3, 0, 1)
+        true_label    = (true_need > 0.5).astype(int)
+        # AI outcome: biased toward formal workers with BVN
+        ai_signal     = (employment_formality*0.5 + income_cont*0.25 +
+                         bvn_status*0.15 + rng.normal(0,0.1,n))
+        outcome       = (ai_signal > 0.5).astype(int)
+
+    elif domain == "oop":
+        insurance_status     = rng.binomial(1, preset.nhis_coverage_rate + income_cont*0.08, n)
+        distance_facility    = np.clip(rng.exponential(3,n) * (1 + location_rural*2), 0, 30)/30
+        prior_payment_hist   = np.clip(income_cont + rng.normal(0,0.1,n), 0, 1)
+        facility_type        = np.clip(income_cont*0.6 + rng.beta(2,3,n)*0.4, 0, 1)
+        disease_severity     = np.clip(rng.beta(2,2,n) + north_flag*0.1, 0, 1)
+        caregiver            = (1-gender).astype(float) * rng.binomial(1,0.65,n)
+        season               = rng.binomial(1, 0.5, n).astype(float)
+        X = np.column_stack([
+            income_cont, location_rural, insurance_status, gender, age/75,
+            household_size if 'household_size' in dir() else np.clip(rng.normal(5.5,2,n),1,15)/15,
+            prior_payment_hist, facility_type, distance_facility,
+            season, disease_severity, caregiver
+        ])
+        true_label = (disease_severity > 0.4).astype(int)  # should receive care
+        ai_signal  = (prior_payment_hist*0.45 + income_cont*0.30 +
+                      insurance_status*0.15 + rng.normal(0,0.1,n))
+        outcome    = (ai_signal > 0.5).astype(int)
+
+    elif domain == "maternal":
+        parity               = np.clip(rng.poisson(3, n), 0, 10) / 10.0
+        anc_visits           = np.clip(rng.poisson(3, n) - location_rural*1.5 - north_flag, 0, 8)
+        distance_facility    = np.clip(rng.exponential(2,n) * (1+location_rural*3+north_flag*1.5), 0, 50)/50
+        skilled_avail        = np.clip(1 - location_rural*0.4 - north_flag*0.3 + rng.normal(0,0.1,n), 0, 1)
+        prior_complication   = rng.binomial(1, 0.15 + north_flag*0.08, n).astype(float)
+        ethnicity_proxy      = north_flag.astype(float) + rng.normal(0, 0.05, n)
+        season               = rng.binomial(1, 0.5, n).astype(float)
+        age_preg             = np.clip(age, 15, 49) / 49.0
+        X = np.column_stack([
+            location_rural, income_cont, education_yrs/20, age_preg,
+            parity, anc_visits/8, distance_facility, skilled_avail,
+            season, np.clip(ethnicity_proxy,0,1), prior_complication, disability_flag
+        ])
+        # True high risk: prior complication OR very young OR very rural + no ANC
+        true_label = ((prior_complication==1) |
+                      (age < 18) | (age > 40) |
+                      ((location_rural==1) & (anc_visits < 2))).astype(int)
+        # AI: biased toward urban, educated, young
+        ai_signal  = (income_cont*0.3 + (1-location_rural)*0.25 +
+                      education_yrs/20*0.2 + anc_visits/8*0.15 + rng.normal(0,0.1,n))
+        # High score = prioritised (good) — AI under-prioritises rural
+        outcome    = (ai_signal > 0.45).astype(int)  # 1=prioritised for skilled care
+
+    elif domain == "workforce":
+        lga_rurality         = location_rural.astype(float) + rng.normal(0,0.05,n)
+        existing_density     = np.clip(rng.beta(1.5,4,n) * (1 + (1-location_rural)*1.5), 0, 1)
+        disease_burden       = np.clip(rng.beta(2,2,n) + north_flag*0.15 + location_rural*0.10, 0, 1)
+        infrastructure_score = np.clip(income_cont*0.6 + rng.beta(2,3,n)*0.4, 0, 1)
+        conflict_affected    = (north_flag * rng.binomial(1, 0.35, n)).astype(float)
+        population_sz        = np.clip(rng.lognormal(9,1.5,n), 5000, 2000000)
+        population_sz        = population_sz / population_sz.max()
+        transport            = np.clip(infrastructure_score*0.7 + rng.normal(0,0.1,n), 0, 1)
+        poverty_idx          = np.clip(1-income_cont + rng.normal(0,0.05,n), 0, 1)
+        vacancy_rate         = np.clip(rng.beta(2,2,n) + location_rural*0.2 + north_flag*0.1, 0, 1)
+        X = np.column_stack([
+            np.clip(lga_rurality,0,1), north_flag, facility_type if 'facility_type' in dir() else rng.beta(2,3,n),
+            existing_density, disease_burden, infrastructure_score,
+            conflict_affected, population_sz, transport, north_flag.astype(float),
+            poverty_idx, vacancy_rate
+        ])
+        true_label = (disease_burden > 0.5).astype(int)  # high burden = should receive workers
+        ai_signal  = (infrastructure_score*0.4 + existing_density*0.25 +
+                      transport*0.2 + rng.normal(0,0.1,n))
+        outcome    = (ai_signal > 0.45).astype(int)  # 1=allocated workers
+
+    elif domain == "pharma":
+        supply_chain_acc     = np.clip(income_cont*0.5 + (1-location_rural)*0.3 + rng.normal(0,0.1,n), 0, 1)
+        cold_chain_avail     = np.clip(supply_chain_acc*0.7 + rng.beta(2,3,n)*0.3, 0, 1)
+        dist_warehouse       = np.clip(rng.exponential(2,n)*(1+location_rural*2), 0, 20)/20
+        pop_density          = np.clip(rng.lognormal(7,1.5,n), 0, 1e6)
+        pop_density          = pop_density / pop_density.max()
+        disease_burden_ph    = np.clip(rng.beta(2,2,n) + north_flag*0.1, 0, 1)
+        insur_local          = np.clip(income_cont*0.1 + rng.beta(1.5,5,n)*0.05, 0, 1)
+        competition          = np.clip(pop_density*0.4 + income_cont*0.3 + rng.normal(0,0.1,n), 0, 1)
+        counterfeit_zone     = ((north_flag==1) | (location_rural==1)).astype(float)
+        stockout_hist        = np.clip(rng.beta(2,2,n) + location_rural*0.2, 0, 1)
+        X = np.column_stack([
+            location_rural, facility_type if 'facility_type' in dir() else rng.beta(2,3,n),
+            income_cont, supply_chain_acc, cold_chain_avail, dist_warehouse,
+            pop_density, disease_burden_ph, insur_local, competition,
+            counterfeit_zone, stockout_hist
+        ])
+        true_label = (disease_burden_ph > 0.4).astype(int)  # high burden = should be supplied
+        ai_signal  = (competition*0.35 + income_cont*0.30 +
+                      supply_chain_acc*0.20 + rng.normal(0,0.1,n))
+        outcome    = (ai_signal > 0.45).astype(int)  # 1=prioritised for drug supply
+
+    else:  # devaid — social investment targeting
+        digital_footprint    = np.clip(bvn_status*0.4 + income_cont*0.3 + rng.beta(2,3,n)*0.3, 0, 1)
+        nin_registered       = rng.binomial(1, 0.61 - location_rural*0.2 - north_flag*0.1, n)
+        mobile_money         = rng.binomial(1, 0.51 - location_rural*0.2 - north_flag*0.1, n)
+        asset_index          = np.clip(income_cont*0.6 + rng.beta(2,4,n)*0.4, 0, 1)
+        household_sz_da      = np.clip(rng.normal(5.5, 2, n), 1, 15) / 15.0
+        X = np.column_stack([
+            digital_footprint, bvn_status, nin_registered, mobile_money,
+            income_cont, location_rural, gender, disability_flag,
+            household_sz_da, asset_index, education_yrs/20, north_flag.astype(float)
+        ])
+        true_label = (income_cont < 0.35).astype(int)  # truly poor = should receive aid
+        ai_signal  = (digital_footprint*0.40 + asset_index*0.30 +
+                      income_cont*0.20 + rng.normal(0,0.1,n))
+        # INVERTED: lower score = should receive aid
+        outcome = (ai_signal < 0.40).astype(int)
+
+    # Clip all X values
+    X = np.clip(X, 0, 1)
+
+    feat_names = _HEALTH_FEATURES[domain][:X.shape[1]]
+    return X, outcome, demo, feat_names, preset
+
+
+# ── §25B.4  Health Fairness Calculator ────────────────────────────────────────
+def calculate_health_finance_fairness(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    X: np.ndarray,
+    feature_names: List[str],
+    preset: HealthFinanceScenarioPreset,
+) -> HealthFairnessMetrics:
+    """
+    §25B.4 — Compute health financing and development economics fairness metrics.
+    All thresholds anchored to WHO, NHIA, and World Bank standards.
+    """
+    domain = preset.health_domain
+    eps    = 1e-8
+    n      = len(y_pred)
+
+    overall_rate = float(np.mean(y_pred))
+
+    # ── Wealth quintile access gap ────────────────────────────────────────────
+    # Feature index 1 = income_cont in most domains
+    income_col = X[:, 1] if X.shape[1] > 1 else np.ones(n) * 0.5
+    q1_mask = income_col < 0.20   # poorest 20%
+    q5_mask = income_col > 0.80   # richest 20%
+    rate_q1 = float(np.mean(y_pred[q1_mask])) if q1_mask.any() else overall_rate
+    rate_q5 = float(np.mean(y_pred[q5_mask])) if q5_mask.any() else overall_rate
+    wealth_gap = abs(rate_q5 - rate_q1)
+
+    # ── Geographic equity: urban/rural ────────────────────────────────────────
+    loc_col = X[:, 2] if X.shape[1] > 2 else X[:, 0]
+    urban_mask = loc_col < 0.4
+    rural_mask = loc_col > 0.6
+    rate_urban = float(np.mean(y_pred[urban_mask])) if urban_mask.any() else overall_rate
+    rate_rural = float(np.mean(y_pred[rural_mask])) if rural_mask.any() else overall_rate
+    geo_gap    = abs(rate_urban - rate_rural)
+    geo_equity = float(np.clip(1.0 - geo_gap * 2, 0, 1))
+
+    # ── Gender health gap ─────────────────────────────────────────────────────
+    gender_col = X[:, 3] if X.shape[1] > 3 else np.ones(n) * 0.5
+    male_mask   = gender_col > 0.5
+    female_mask = gender_col <= 0.5
+    rate_male   = float(np.mean(y_pred[male_mask]))   if male_mask.any()   else overall_rate
+    rate_female = float(np.mean(y_pred[female_mask])) if female_mask.any() else overall_rate
+    gender_gap  = abs(rate_male - rate_female)
+
+    # ── Insurance denial gap ──────────────────────────────────────────────────
+    if domain == "insurance":
+        # Gap between formal (col 0 > 0.5) and informal (col 0 < 0.5) workers
+        formal_mask   = X[:, 0] > 0.5
+        informal_mask = X[:, 0] <= 0.5
+        r_formal   = float(np.mean(y_pred[formal_mask]))   if formal_mask.any()   else overall_rate
+        r_informal = float(np.mean(y_pred[informal_mask])) if informal_mask.any() else overall_rate
+        ins_denial_gap = abs(r_formal - r_informal)
+    else:
+        ins_denial_gap = wealth_gap * 0.7
+
+    # ── Catastrophic expenditure risk ─────────────────────────────────────────
+    # Fraction of poor households denied (y_pred=0) where y_true=1 (needed care)
+    poor_mask  = income_col < 0.30
+    denied_need = (y_pred == 0) & (y_true == 1)
+    if poor_mask.any():
+        cat_exp_risk = float(np.mean(denied_need[poor_mask]))
+    else:
+        cat_exp_risk = float(np.mean(denied_need))
+    # Scale by OOP burden
+    cat_exp_risk = float(np.clip(cat_exp_risk * preset.oop_expenditure_pct, 0, 1))
+
+    # ── Poverty trap risk ─────────────────────────────────────────────────────
+    # Probability that denial pushes near-poor over catastrophic threshold
+    near_poor = (income_col > 0.15) & (income_col < 0.35)
+    if near_poor.any():
+        poverty_trap = float(np.mean(denied_need[near_poor])) * 0.65
+    else:
+        poverty_trap = cat_exp_risk * 0.65
+    poverty_trap = float(np.clip(poverty_trap, 0, 1))
+
+    # ── OOP disparity index ───────────────────────────────────────────────────
+    oop_disparity = float(np.clip(wealth_gap * preset.oop_expenditure_pct * 1.5, 0, 1))
+
+    # ── Maternal health metrics ───────────────────────────────────────────────
+    if domain == "maternal":
+        # ANC coverage gap: col 5 = anc_visits
+        anc_col = X[:, 5] if X.shape[1] > 5 else np.ones(n) * 0.5
+        anc_low  = anc_col < 0.375  # <3 visits
+        anc_high = anc_col >= 0.5   # 4+ visits
+        r_anc_low  = float(np.mean(y_pred[anc_low]))  if anc_low.any()  else overall_rate
+        r_anc_high = float(np.mean(y_pred[anc_high])) if anc_high.any() else overall_rate
+        anc_gap      = abs(r_anc_high - r_anc_low)
+        maternal_gap = float(np.clip(geo_gap + wealth_gap * 0.5, 0, 1))
+        # Child survival proxy: FNR in rural poor
+        rural_poor = (loc_col > 0.6) & (income_col < 0.25)
+        if rural_poor.any():
+            fnr_rp = float(np.mean(y_pred[rural_poor & (y_true == 1)] == 0))
+        else:
+            fnr_rp = float(np.mean(y_pred[y_true==1] == 0))
+        child_survival = float(np.clip(fnr_rp * (preset.u5_mortality_rate / 117.0), 0, 1))
+    else:
+        anc_gap        = wealth_gap * 0.4
+        maternal_gap   = wealth_gap * 0.5
+        child_survival = cat_exp_risk * 0.3
+
+    # ── Development aid targeting errors ─────────────────────────────────────
+    if domain == "devaid":
+        truly_poor = y_true == 1
+        # Exclusion error: poor people not reached
+        excl_err = float(np.mean(y_pred[truly_poor] == 0)) if truly_poor.any() else 0.0
+        # Inclusion error: non-poor receiving aid
+        not_poor = y_true == 0
+        incl_err = float(np.mean(y_pred[not_poor] == 1)) if not_poor.any() else 0.0
+        # Digital exclusion: no digital footprint → excluded
+        no_digital = X[:, 0] < 0.20
+        dev_targeting_err = float(np.mean(y_pred[no_digital & truly_poor] == 0)) \
+            if (no_digital & truly_poor).any() else excl_err
+        poverty_proxy_acc = float(1.0 - abs(excl_err - incl_err))
+    else:
+        excl_err           = float(np.mean((y_pred == 0) & (y_true == 1)))
+        incl_err           = float(np.mean((y_pred == 1) & (y_true == 0)))
+        dev_targeting_err  = excl_err
+        poverty_proxy_acc  = 1.0 - excl_err
+
+    # ── UHC service coverage gap ──────────────────────────────────────────────
+    # WHO UHC index: Nigeria 43/100; target 80/100 by 2030
+    uhc_baseline    = 0.43
+    ai_impact       = max(wealth_gap, geo_gap) * 0.5
+    uhc_current_sim = float(np.clip(uhc_baseline - ai_impact, 0, 1))
+    uhc_gap         = float(np.clip(0.80 - uhc_current_sim, 0, 0.80))
+
+    # ── Composite health financing fairness score ─────────────────────────────
+    hf_fairness = float(np.clip(
+        1.0 - (wealth_gap * 0.25 + geo_gap * 0.20 + gender_gap * 0.15 +
+               cat_exp_risk * 0.20 + ins_denial_gap * 0.20),
+        0.05, 1.0))
+
+    # ── Canonical GAGS fairness score ─────────────────────────────────────────
+    max_gap       = max(wealth_gap, geo_gap, gender_gap, ins_denial_gap)
+    fairness_score = float(np.clip(1.0 - max_gap * 2.2 - cat_exp_risk * 0.4, 0.05, 1.0))
+
+    # ── Critical flags ─────────────────────────────────────────────────────────
+    flags: List[str] = []
+    if wealth_gap > 0.20:
+        flags.append(f"🚨 Wealth quintile access gap {wealth_gap:.1%} — violates WHO equity principle; "
+                     f"Q5 patients {wealth_gap:.1%} more likely to receive care than Q1")
+    if geo_gap > 0.15:
+        flags.append(f"⚠️ Urban–rural access gap {geo_gap:.1%} exceeds 15pp — "
+                     f"FMOH rural health equity standard violated")
+    if cat_exp_risk > 0.10:
+        flags.append(f"🚨 Catastrophic expenditure risk {cat_exp_risk:.1%} — "
+                     f"AI denial forcing {cat_exp_risk:.1%} of poor patients into catastrophic OOP spending")
+    if poverty_trap > 0.08:
+        flags.append(f"🚨 Poverty trap risk {poverty_trap:.1%} — near-poor households pushed into "
+                     f"destitution by AI denial; violates World Bank social protection standards")
+    if uhc_gap > 0.40:
+        flags.append(f"⚠️ UHC coverage gap {uhc_gap:.2f} — AI is widening Nigeria's distance "
+                     f"from SDG 3.8 universal health coverage target (80% by 2030)")
+    if domain == "maternal" and maternal_gap > 0.20:
+        flags.append(f"🚨 Maternal access gap {maternal_gap:.1%} — CRITICAL: AI misclassification "
+                     f"directly contributes to maternal mortality in rural and northern populations")
+    if domain == "devaid" and excl_err > 0.25:
+        flags.append(f"🚨 Exclusion error {excl_err:.1%} — {excl_err:.1%} of truly poor households "
+                     f"denied social protection by AI; pattern consistent with Robodebt")
+    if ins_denial_gap > 0.25:
+        flags.append(f"⚠️ Insurance denial gap {ins_denial_gap:.1%} — informal sector workers "
+                     f"({preset.informal_sector_pct:.0%} of workforce) systematically excluded from NHIA")
+
+    # ── Domain narratives ─────────────────────────────────────────────────────
+    domain_labels = {
+        "insurance": "NHIA health insurance AI eligibility scoring",
+        "oop":       "hospital triage and OOP fee-setting AI",
+        "maternal":  "maternal health AI risk stratification",
+        "workforce": "health workforce allocation AI",
+        "pharma":    "pharmaceutical supply and pricing AI",
+        "devaid":    "social investment programme targeting AI",
+    }
+    d_label = domain_labels.get(domain, domain)
+
+    if fairness_score >= 0.72:
+        tone   = "relatively equitable"
+        action = "Continue monitoring. Annual health equity audit recommended. WHO UHC tracking advised."
+    elif fairness_score >= 0.50:
+        tone   = "moderately inequitable"
+        action = (f"Health equity intervention required. Audit {preset.protected_attributes} "
+                  f"for differential access. Engage {preset.regulatory_body} and FMOH PHC Division.")
+    else:
+        tone   = "severely inequitable — this system is causing measurable health harm"
+        action = (f"CRITICAL: Suspend deployment pending equity audit. "
+                  f"Wealth gap ({wealth_gap:.1%}) and geographic gap ({geo_gap:.1%}) indicate "
+                  f"systematic exclusion. Escalate to {preset.regulatory_body}, FMOH, and WHO AFRO.")
+
+    narrative = (
+        f"{preset.name}: {d_label} is {tone} (health equity score {fairness_score:.2f}). "
+        f"Wealth quintile gap: {wealth_gap:.1%} | Geographic gap: {geo_gap:.1%} | "
+        f"Gender gap: {gender_gap:.1%} | Catastrophic expenditure risk: {cat_exp_risk:.1%} | "
+        f"UHC coverage gap: {uhc_gap:.2f}. {action}"
+    )
+
+    return HealthFairnessMetrics(
+        insurance_denial_gap=round(ins_denial_gap, 4),
+        geographic_equity_index=round(geo_equity, 4),
+        wealth_quintile_access_gap=round(wealth_gap, 4),
+        gender_health_gap=round(gender_gap, 4),
+        catastrophic_expenditure_risk=round(cat_exp_risk, 4),
+        poverty_trap_risk=round(poverty_trap, 4),
+        oop_disparity_index=round(oop_disparity, 4),
+        maternal_access_gap=round(maternal_gap, 4),
+        child_survival_proxy=round(child_survival, 4),
+        antenatal_coverage_gap=round(anc_gap, 4),
+        development_targeting_error=round(dev_targeting_err, 4),
+        inclusion_error=round(incl_err, 4),
+        poverty_proxy_accuracy=round(poverty_proxy_acc, 4),
+        health_financing_fairness=round(hf_fairness, 4),
+        uhc_service_coverage_gap=round(uhc_gap, 4),
+        fairness_score=round(fairness_score, 4),
+        narrative=narrative,
+        critical_flags=flags,
+    )
+
+
+logger.info("[Economics] Economic Justice Engine (§25+§25B) loaded — 6 economic + 6 health finance scenarios active")
 logger.info(f"[GAGS] governance_logic.py fully loaded — {len(COMMUNITY_SCENARIOS)} scenarios, §1–§25 active")

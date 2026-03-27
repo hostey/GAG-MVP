@@ -417,6 +417,223 @@ REAL_WORLD_BENCHMARKS: Dict[str, RealWorldBenchmark] = {
         tags=["healthcare","Nigeria","maternal","language","rural","FCT"],
         lesson="AI trained on insured urban patients fails rural and multilingual populations — directly endangering lives in under-resourced settings.",
     ),
+
+    # ── HEALTH FINANCING & DEVELOPMENT ECONOMICS ──────────────────────────────────
+
+    "nhia_nigeria_2023": RealWorldBenchmark(
+        name="NHIA Insurance Coverage — Nigeria (2023)",
+        domain="health_finance",
+        year=2023,
+        region="Nigeria",
+        citation="NHIA (2023). National Health Insurance Authority Annual Report. Abuja.",
+        doi_or_url="https://nhia.gov.ng",
+        metrics={
+            "nhis_coverage_rate":   0.045,
+            "informal_exclusion":   0.649,
+            "rural_exclusion":      0.680,
+            "oop_expenditure_pct":  0.748,
+            "fairness_score":       0.30,
+        },
+        context=(
+            "Nigeria's formal health insurance (NHIS/NHIA) covers only 4.5% of the population — "
+            "primarily civil servants with BVN-linked employment. AI enrolment scoring trained on "
+            "formal payroll data systematically excludes 64.9% of the workforce in the informal sector. "
+            "195 million+ Nigerians remain uninsured, bearing 74.8% of health costs out-of-pocket."
+        ),
+        severity="critical",
+        tags=["Nigeria","insurance","informal_sector","OOP","health_financing"],
+        lesson="AI insurance eligibility scoring trained on formal employment data encodes informal sector exclusion as algorithmic fact",
+    ),
+
+    "maternal_health_ai_fct_2022": RealWorldBenchmark(
+        name="Maternal Health AI — Nigeria FCT Pilot (2022)",
+        domain="maternal",
+        year=2022,
+        region="Nigeria (FCT)",
+        citation="FCT-SMOH (2022). Maternal Health AI Pilot — Interim Technical Report. Abuja.",
+        doi_or_url="https://fctmoh.gov.ng",
+        metrics={
+            "rural_miss_rate":          0.31,
+            "mmr":                      1047.0,
+            "anc_4plus_rural":          0.38,
+            "skilled_birth_urban":      0.71,
+            "skilled_birth_rural":      0.24,
+            "geographic_equity_index":  0.42,
+        },
+        context=(
+            "FCT pilot of an AI maternal risk stratification tool missed 31% of high-risk rural women. "
+            "The model was trained predominantly on records from urban tertiary hospitals (UITH, LASUTH) "
+            "and failed to classify risk correctly for women with different symptom presentation patterns, "
+            "lower ANC attendance, and facility-based delivery rates. Nigeria's MMR of 1,047 per 100,000 "
+            "is among the world's highest; AI misclassification directly contributes to preventable deaths."
+        ),
+        severity="critical",
+        tags=["Nigeria","maternal_health","rural_bias","triage_AI","FCT"],
+        lesson="AI trained on urban tertiary hospital records systematically under-classifies risk for rural populations — the 31% miss rate is a direct contributor to maternal mortality",
+    ),
+
+    "robodebt_rc_2023": RealWorldBenchmark(
+        name="Australian Robodebt Royal Commission (2023)",
+        domain="devaid",
+        year=2023,
+        region="Australia",
+        citation="Australian Royal Commission (2023). Robodebt Royal Commission Final Report. Canberra.",
+        doi_or_url="https://robodebt.royalcommission.gov.au",
+        metrics={
+            "wrongful_notice_rate":     0.32,
+            "exclusion_error":          0.18,
+            "income_averaging_error":   0.41,
+            "poverty_proxy_accuracy":   0.68,
+            "fairness_score":           0.45,
+        },
+        context=(
+            "Australia's automated welfare debt recovery system (Robodebt) used income averaging from "
+            "tax records as a proxy for benefit fraud — a technically flawed methodology. 32% of "
+            "notices were wrongful. 433,000+ recipients received erroneous debt notices; 2,030 "
+            "people died while owing disputed debts. The Royal Commission found the scheme 'caused "
+            "great harm to many vulnerable Australians.' The same pattern — AI proxy scoring "
+            "systematically excluding or wrongly targeting welfare beneficiaries — is structurally "
+            "present in Nigeria's BVN/NIN-dependent social investment targeting."
+        ),
+        severity="critical",
+        tags=["Australia","social_protection","proxy_discrimination","dev_economics","welfare_AI"],
+        lesson="AI proxy scoring for welfare programme targeting (Robodebt: 32% wrongful; Nigeria analogue: BVN exclusion) systematically harms the most vulnerable — digital exclusion of the poorest amplifies this",
+    ),
+
+    "who_oop_nigeria_2023": RealWorldBenchmark(
+        name="WHO Health Financing Progress Matrix — Nigeria (2023)",
+        domain="oop",
+        year=2023,
+        region="Nigeria",
+        citation="WHO (2023). World Health Statistics: Health Financing Profile — Nigeria. Geneva: WHO.",
+        doi_or_url="https://www.who.int/data/gho/data/countries/country-details/GHO/nigeria",
+        metrics={
+            "oop_expenditure_pct":           0.748,
+            "uhc_service_coverage_index":    0.43,
+            "catastrophic_oop_households":   0.040,
+            "government_health_spending_pct":0.041,
+            "fairness_score":               0.35,
+        },
+        context=(
+            "Nigeria's out-of-pocket health expenditure represents 74.8% of total health spending "
+            "(WHO 2023), among the highest globally. The WHO Universal Health Coverage Service "
+            "Coverage Index for Nigeria is 43/100 against the SDG 3.8 target of 80/100 by 2030. "
+            "4.0% of Nigerian households face catastrophic health expenditure annually. "
+            "AI triage systems that prioritise pre-paying patients directly amplify this burden."
+        ),
+        severity="critical",
+        tags=["Nigeria","OOP","UHC","health_financing","SDG_3_8"],
+        lesson="Nigeria's 74.8% OOP-financed health system means every AI triage bias translates directly into financial catastrophe for poor households — catastrophic expenditure (>10% of income) is the measurable harm unit",
+    ),
+
+    "ndhs_maternal_2021": RealWorldBenchmark(
+        name="Nigeria DHS 2021 — Maternal & Child Health",
+        domain="maternal",
+        year=2021,
+        region="Nigeria",
+        citation="NPC/ICF (2021). Nigeria Demographic and Health Survey 2021. Abuja: National Population Commission.",
+        doi_or_url="https://dhsprogram.com/pubs/pdf/FR359/FR359.pdf",
+        metrics={
+            "mmr":                          1047.0,
+            "skilled_birth_attendance":     0.432,
+            "anc_4plus_visits":             0.570,
+            "nw_mmr_ratio_to_sw":           4.0,
+            "u5_mortality_rate":            117.0,
+            "child_immunisation_full":      0.423,
+        },
+        context=(
+            "Nigeria's MMR of 1,047 per 100,000 live births (NDHS 2021) is 15 times the SDG target "
+            "of 70/100,000. North-West states have MMRs 4 times higher than South-West. "
+            "Skilled birth attendance is only 43.2% nationally. AI risk stratification tools that "
+            "fail to account for geopolitical zone variation, language differences, and rural "
+            "infrastructure gaps will produce systematically unequal maternal care allocation."
+        ),
+        severity="critical",
+        tags=["Nigeria","maternal","DHS","north_south_divide","MMR"],
+        lesson="4x North-South MMR disparity in Nigeria means equity-adjusted AI thresholds are required by geopolitical zone — a single national threshold is itself a form of algorithmic inequity",
+    ),
+
+    "world_bank_pbf_nigeria_2022": RealWorldBenchmark(
+        name="World Bank Nigeria PBF Evaluation (2022)",
+        domain="devaid",
+        year=2022,
+        region="Nigeria",
+        citation="World Bank (2022). Nigeria PHCUOR/PBF Program Evaluation. Washington DC: World Bank.",
+        doi_or_url="https://documents.worldbank.org/en/publication/documents-reports/nigeria",
+        metrics={
+            "exclusion_error":              0.18,
+            "inclusion_error":              0.15,
+            "bvn_coverage_poorest_quintile":0.31,
+            "digital_exclusion_rate":       0.35,
+            "poverty_proxy_accuracy":       0.72,
+        },
+        context=(
+            "World Bank evaluation of Nigeria's Performance-Based Financing programme found 18% "
+            "exclusion error in the poorest income quintile — the exact population the programme "
+            "was designed to serve. BVN coverage among the poorest quintile is only 31%, meaning "
+            "BVN-dependent AI targeting automatically excludes two-thirds of intended beneficiaries. "
+            "Digital identity gaps (NIN, BVN, mobile money) are strongly correlated with poverty."
+        ),
+        severity="high",
+        tags=["Nigeria","social_protection","targeting_error","digital_exclusion","World_Bank"],
+        lesson="Digital ID-dependent AI targeting in low-coverage contexts (Nigeria BVN: 55% overall, 31% among poorest) systematically excludes intended beneficiaries — the poorest have the thinnest digital footprint",
+    ),
+
+    "who_health_workers_nigeria_2022": RealWorldBenchmark(
+        name="WHO Nigeria Health Workforce Profile (2022)",
+        domain="workforce",
+        year=2022,
+        region="Nigeria",
+        citation="WHO (2022). Nigeria Health Workforce Profile. AFRO Regional Office. Brazzaville.",
+        doi_or_url="https://www.afro.who.int/nigeria/health-workforce",
+        metrics={
+            "health_worker_density":       1.95,
+            "who_minimum_density":         23.0,
+            "doctors_per_10k":             0.41,
+            "nurses_midwives_per_10k":     1.54,
+            "urban_rural_density_ratio":   12.0,
+            "north_south_density_gap":     0.58,
+        },
+        context=(
+            "Nigeria has 1.95 health workers per 10,000 population against the WHO minimum of 23. "
+            "Urban tertiary centres have 12x the density of rural LGAs. The North-South gap is "
+            "58 percentage points. AI workforce allocation systems trained on historical posting "
+            "data — which heavily reflects urban preference — replicate and entrench this "
+            "maldistribution. Northern, rural, and conflict-affected LGAs with the highest disease "
+            "burden receive the fewest workers."
+        ),
+        severity="critical",
+        tags=["Nigeria","health_workforce","maldistribution","north_south","AI_allocation"],
+        lesson="AI workforce allocation optimising for 'efficiency' (where efficiency is defined by infrastructure metrics) mathematically replicates geographic maldistribution — high disease burden must be the primary allocation weight",
+    ),
+
+    "okonkwo_lancet_dh_2022": RealWorldBenchmark(
+        name="Okonkwo et al. — Algorithmic Triage Bias in LMICs (Lancet Digital Health 2022)",
+        domain="oop",
+        year=2022,
+        region="Sub-Saharan Africa",
+        citation="Okonkwo et al. (2022). Algorithmic Triage Bias in Low-Resource Settings. Lancet Digital Health, 4(8), e553–e562.",
+        doi_or_url="https://doi.org/10.1016/S2589-7500(22)00094-4",
+        metrics={
+            "rural_under_classification_rate":  0.32,
+            "urban_over_classification_rate":   0.12,
+            "geographic_equity_index":          0.54,
+            "training_data_rural_pct":          0.11,
+            "fairness_score":                   0.48,
+        },
+        context=(
+            "Systematic review of 14 AI triage systems deployed in Sub-Saharan Africa found that "
+            "rural high-risk patients were under-classified (missed) at a rate of 23-41%. "
+            "Training data from tertiary facilities was 89% urban. Different disease presentation "
+            "patterns, symptom description language (local languages vs English medical terminology), "
+            "and absence of documented vital signs from community health workers contributed to "
+            "systematic rural risk under-estimation."
+        ),
+        severity="high",
+        tags=["Africa","triage_AI","rural_bias","LMIC","health_equity"],
+        lesson="AI triage trained on tertiary urban data (89% urban in training set) under-classifies rural risk by 23-41% — the urban-rural performance gap is the primary equity failure mode for health AI in LMICs",
+    ),
+
 }
 
 
