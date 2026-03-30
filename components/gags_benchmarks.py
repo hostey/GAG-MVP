@@ -393,7 +393,7 @@ REAL_WORLD_BENCHMARKS: Dict[str, RealWorldBenchmark] = {
     ),
 
     "nigeria_maternal_health_ai_2022": RealWorldBenchmark(
-        name="Maternal Health AI — Nigeria FCT Pilot",
+        name="Maternal Health AI — Nigeria Pilot",
         domain="healthcare",
         year=2022,
         region="Nigeria",

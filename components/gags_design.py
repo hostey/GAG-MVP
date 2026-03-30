@@ -210,6 +210,8 @@ hr{{border-color:var(--bg3)!important;margin:1.5rem 0!important}}
 .flag-warn{{background:#fffbeb;border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;
   padding:.75rem 1rem;margin:.45rem 0;font-size:.82rem;color:#92400e;line-height:1.5}}
 
+
+
 /* ── Slot cards (comparison mode) ── */
 .slot-a{{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
   padding:.5rem .85rem;margin:.5rem 0;font-family:var(--ff-m);font-size:.78rem;color:#1d4ed8}}

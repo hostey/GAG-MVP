@@ -23,7 +23,7 @@ Feature classes
 
 Core functions
     generate_synthetic_data()       — baseline synthetic data generation
-    generate_africa_centric_data()  — Feature 3 Abuja-specific data (returns preset metadata)
+    generate_africa_centric_data()  — Feature 3 Nigeria-specific data (returns preset metadata)
     run_gender_equity_audit()       — Feature 3 UNESCO Women4EthicalAI audit
     apply_bias()                    — dispatch to BiasInjector by bias type + severity
     simulate_data_poisoning()       — multi-strategy adversarial data attacks
@@ -51,7 +51,7 @@ NEW  BiasInjector methods             — gender_bias, linguistic_bias, temporal
 NEW  apply_bias dispatch table        — replaces scattered if/elif chain
 NEW  input validation in run_simple   — bias_factor / poison_rate clamped; unknown bias warned
 NEW  warnings list in envelope        — callers receive actionable surface-level warnings
-NEW  AFRICA_SCENARIO_PRESETS          — Abuja FCT scenario parameter dictionary
+NEW  AFRICA_SCENARIO_PRESETS          — Nigeria scenario parameter dictionary
 NEW  generate_africa_centric_data()   — Feature 3 data generator with local distributions
 NEW  run_gender_equity_audit()        — Feature 3 UNESCO audit with digital-inclusion metrics
 NEW  GenderEquityAuditResult          — typed dataclass for audit output
@@ -341,7 +341,7 @@ class StrategicAgent:
 # §3  CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Feature 3 — Abuja-specific scenario presets
+# Feature 3 — Nigeria-specific scenario presets
 AFRICA_SCENARIO_PRESETS: Dict[str, Dict[str, Any]] = {
     "smallholder_agrotech": {
         "description":              "Climate-resilient agriculture for smallholders in Plateau State, Nigeria",
@@ -357,7 +357,7 @@ AFRICA_SCENARIO_PRESETS: Dict[str, Dict[str, Any]] = {
         },
     },
     "multilingual_healthcare": {
-        "description":              "Equitable healthcare delivery in multilingual Abuja FCT",
+        "description":              "Equitable healthcare delivery in multilingual Nigeria",
         "languages":                ["Hausa", "Yoruba", "Igbo", "English"],
         "gender_distribution":      {"female": 0.51, "male": 0.49},
         "digital_inclusion_baseline": 0.45,
@@ -686,7 +686,7 @@ def generate_africa_centric_data(
     n_features: int = 10,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """
-    Generate synthetic data using Abuja FCT-calibrated scenario presets.
+    Generate synthetic data using Nigeria-calibrated scenario presets.
 
     Feature 0: Age         — local normal distribution (mean ~38)
     Feature 1: Income      — local log-normal (lower than global default)
@@ -3391,11 +3391,11 @@ COMMUNITY_SCENARIOS: Dict[str, CommunityScenario] = {
         id="HC-NG-001",
         name="Nigeria Health Insurance Exclusion",
         domain="healthcare",
-        region="Nigeria (Abuja FCT)",
+        region="Nigeria (Nigeria)",
         description=(
             "Simulates a hospital triage AI trained on data where insured patients "
             "received more complete clinical records, creating systematic under-diagnosis "
-            "for uninsured low-income patients. Mirrors documented patterns in FCT "
+            "for uninsured low-income patients. Mirrors documented patterns in Nigeria "
             "primary healthcare centres."
         ),
         bias_types=["demographic", "socioeconomic", "historical"],
@@ -3996,7 +3996,7 @@ EDUCATION_SCENARIO_PRESETS: Dict[str, EducationScenarioPreset] = {
         socioeconomic_bias=0.34,
     ),
     "primary_dropout": EducationScenarioPreset(
-        name="Primary School Dropout Risk (FCT)",
+        name="Primary School Dropout Risk (Nigeria)",
         description="Early-warning AI flags students at risk of dropping out. "
                     "Northern Nigeria context: girls disproportionately flagged due to "
                     "cultural factors misread as risk factors by the model.",
@@ -5027,7 +5027,7 @@ COMMUNITY_SCENARIOS.update({
         id="ED-NG-001",
         name="JAMB Coaching Access Bias",
         domain="education",
-        region="Nigeria (FCT / South-West)",
+        region="Nigeria (Nigeria)",
         description="JAMB admission AI trained on historical scores where high-scorers "
                     "disproportionately attended private schools with expensive coaching. "
                     "Model confounds coaching access with academic ability.",
@@ -5180,7 +5180,7 @@ ECONOMIC_SCENARIO_PRESETS: Dict[str, EconomicScenarioPreset] = {
         name="Algorithmic Hiring — Nigeria Tech Sector",
         description=(
             "AI resume screening and video-interview scoring for Nigerian tech and BPO roles. "
-            "Models trained on historical hires from elite Lagos/Abuja institutions systematically "
+            "Models trained on historical hires from elite Lagos/Nigeria institutions systematically "
             "down-score applicants from state universities, women (voice/affect bias in video AI), "
             "and candidates with Northern Nigerian accents. Youth unemployment compounds impact."
         ),
@@ -5846,11 +5846,11 @@ HEALTH_FINANCE_SCENARIO_PRESETS: Dict[str, HealthFinanceScenarioPreset] = {
     ),
 
     "maternal_health_ai_nigeria": HealthFinanceScenarioPreset(
-        name="Maternal Health AI Risk Scoring — FCT Nigeria",
+        name="Maternal Health AI Risk Scoring — Nigeria",
         description=(
             "AI risk stratification for antenatal care (ANC) prioritisation and skilled birth "
-            "attendance allocation in Federal Capital Territory and surrounding states. "
-            "FCT pilot study (2022) showed AI missed 31% of high-risk rural women due to "
+            "attendance allocation in Nigeria. "
+            "Nigeria pilot study (2022) showed AI missed 31% of high-risk rural women due to "
             "training data dominated by urban tertiary hospital records. Nigeria's MMR of 1,047 "
             "per 100,000 (NDHS 2021) is among the world's highest; algorithmic misclassification "
             "directly costs lives. North–South disparity: NW states have 4× higher MMR than SW."
@@ -5870,7 +5870,7 @@ HEALTH_FINANCE_SCENARIO_PRESETS: Dict[str, HealthFinanceScenarioPreset] = {
         regulatory_body="FMOH",
         citation=(
             "NDHS (2021). Nigeria Demographic and Health Survey — Maternal Health. | "
-            "FCT-SMOH (2022). Maternal Health AI Pilot — Interim Report. Abuja. | "
+            "Nigeria-SMOH (2022). Maternal Health AI Pilot — Interim Report. Abuja. | "
             "Okonkwo et al. (2022). Algorithmic Triage Bias in Low-Resource Settings. Lancet Digital Health."
         ),
     ),
@@ -6040,6 +6040,11 @@ def generate_health_finance_data(
         (wealth_quintile >= 4) & (location_rural == 0) & (north_flag == 0), 1, 0
     )
 
+    # ── Shared defaults — overridden per domain below ─────────────────────────
+    # Defined here so all domain branches can reference them without guards
+    household_size    = np.clip(rng.normal(5.5, 2, n), 1, 15) / 15.0
+    facility_type     = np.clip(income_cont * 0.6 + rng.beta(2, 3, n) * 0.4, 0, 1)
+
     X = np.zeros((n, 12))
 
     if domain == "insurance":
@@ -6070,7 +6075,7 @@ def generate_health_finance_data(
         season               = rng.binomial(1, 0.5, n).astype(float)
         X = np.column_stack([
             income_cont, location_rural, insurance_status, gender, age/75,
-            household_size if 'household_size' in dir() else np.clip(rng.normal(5.5,2,n),1,15)/15,
+            household_size,
             prior_payment_hist, facility_type, distance_facility,
             season, disease_severity, caregiver
         ])
@@ -6115,7 +6120,7 @@ def generate_health_finance_data(
         poverty_idx          = np.clip(1-income_cont + rng.normal(0,0.05,n), 0, 1)
         vacancy_rate         = np.clip(rng.beta(2,2,n) + location_rural*0.2 + north_flag*0.1, 0, 1)
         X = np.column_stack([
-            np.clip(lga_rurality,0,1), north_flag, facility_type if 'facility_type' in dir() else rng.beta(2,3,n),
+            np.clip(lga_rurality,0,1), north_flag, facility_type,
             existing_density, disease_burden, infrastructure_score,
             conflict_affected, population_sz, transport, north_flag.astype(float),
             poverty_idx, vacancy_rate
@@ -6137,7 +6142,7 @@ def generate_health_finance_data(
         counterfeit_zone     = ((north_flag==1) | (location_rural==1)).astype(float)
         stockout_hist        = np.clip(rng.beta(2,2,n) + location_rural*0.2, 0, 1)
         X = np.column_stack([
-            location_rural, facility_type if 'facility_type' in dir() else rng.beta(2,3,n),
+            location_rural, facility_type,
             income_cont, supply_chain_acc, cold_chain_avail, dist_warehouse,
             pop_density, disease_burden_ph, insur_local, competition,
             counterfeit_zone, stockout_hist

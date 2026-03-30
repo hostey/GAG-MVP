@@ -3,7 +3,7 @@
 Agrotech Equity Simulation — GAGS Framework v3.0
 
 The missing domain page. Covers:
-  - Smallholder farming scenarios (Plateau State, Abuja FCT)
+  - Smallholder farming scenarios (Plateau State, Nigeria)
   - Climate-resilient agriculture bias testing
   - AI Agent Economy for resource allocation (irrigation, fertilizer, drones)
   - Gender equity audit (52% female smallholder farmers)
@@ -17,6 +17,9 @@ The missing domain page. Covers:
 import json
 from datetime import datetime
 import warnings
+from components.nigeria_states import state_selector, state_info_card, get_state_params, apply_state_to_preset
+from components.translate import install_auto_translate, tx, tx_plotly, language_switcher
+install_auto_translate()
 warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -58,7 +61,7 @@ from components.governance_logic import (
     generate_model_card,
 )
 from utils.config import simulation_config, settings
-from components.i18n import t, get_lang, language_switcher, language_badge
+from components.i18n import t, get_lang, language_badge
 from components.ussd_simulator import ussd_interface, accessibility_gap_report, format_sms_result
 from components.nigeria_regulatory import nigeria_compliance_panel
 from components.ux_utils import (
@@ -73,6 +76,26 @@ from components.ux_utils import (
 
 st.set_page_config(page_title="Agrotech Equity • GAGS", layout="wide", page_icon="🌾")
 
+# ── Safe top-level preset_info guard ──────────────────────────────────────────
+from components.governance_logic import FINANCIAL_SCENARIO_PRESETS as _FSP
+# Agrotech uses its own scenario system - just ensure preset_info is available
+# (Agrotech's preset_info is defined inside sidebar, we provide a safe default)
+_agro_scenarios = ["Nigeria Smallholder", "Climate-Resilient Maize",
+                   "Irrigation Access", "Market Linkage AI", "Nigeria"]
+if "agro_scenario_key" not in st.session_state:
+    st.session_state["agro_scenario_key"] = _agro_scenarios[0]
+
+
+
+# ── Design system ──────────────────────────────────────────────────────────────
+try:
+    from components.gags_design import inject_css, DOMAIN_ACCENTS, page_header, plotly_theme as _ptheme
+    inject_css("agrotech")
+    ACCENT = DOMAIN_ACCENTS["agrotech"]
+except ImportError:
+    ACCENT = "#22c55e"
+
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 # simulation_config.BIAS_TYPES holds the core list defined before Feature 3.
 # Gender and linguistic were added as BiasType enum values in governance_logic §1
@@ -82,7 +105,7 @@ _VALID_BIAS_TYPES = list(simulation_config.BIAS_TYPES) + [
     b for b in _FEATURE3_BIAS_TYPES if b not in simulation_config.BIAS_TYPES
 ]
 
-_AGRO_POLICY       = "Deploy AI crop-advisory system to smallholder farmers in FCT"
+_AGRO_POLICY       = "Deploy AI crop-advisory system to smallholder farmers in Nigeria"
 
 _AGRO_FEATURE_NAMES = [
     "age", "income_level", "connectivity_score",
@@ -97,8 +120,8 @@ _CROP_SCENARIOS = {
         "target": "crop_failure_risk",
         "key_features": ["rainfall_index", "soil_quality", "climate_stress"],
     },
-    "FCT Market Access": {
-        "desc": "Predicting whether farmers can access Abuja FCT markets profitably",
+    "Nigeria Market Access": {
+        "desc": "Predicting whether farmers can access Nigeria markets profitably",
         "target": "market_access_viable",
         "key_features": ["market_distance_km", "income_level", "connectivity_score"],
     },
@@ -135,7 +158,7 @@ for _k, _v in _STATE_DEFAULTS.items():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _generate_agro_data(scenario_key: str, n_samples: int, noise_level: float = 0.1):
-    """Generate Abuja FCT-calibrated agrotech data."""
+    """Generate Nigeria-calibrated agrotech data."""
     try:
         X, y_base, demo, preset = generate_africa_centric_data(
             scenario="smallholder_agrotech", n_samples=n_samples)
@@ -210,7 +233,7 @@ def _train_and_score(X: np.ndarray, y: np.ndarray, random_state: int = 42):
     Xs = scaler.fit_transform(X)
     X_tr, X_te, y_tr, y_te = train_test_split(
         Xs, y, test_size=0.3, random_state=random_state,
-        stratify=y if len(np.unique(y)) > 1 else None)
+        stratify=y if (len(np.unique(y)) > 1 and np.bincount(y.astype(int)).min() >= 2) else None)
 
     clf = RandomForestClassifier(n_estimators=100, class_weight="balanced",
                                   random_state=random_state)
@@ -374,14 +397,65 @@ def _run_one(
 # Sidebar
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ── Advanced chart & benchmark libraries ──────────────────────────────────────
+try:
+    from components.gags_charts import (
+        waterfall_feature_contributions, benchmark_comparison_bar,
+        lollipop_gap_chart, radar_with_benchmark, fairness_heatmap,
+        multi_run_distribution, animated_bias_drift, gauge_cluster,
+        ai_bias_incident_timeline, make_economic_sankey,
+    )
+    CHARTS_OK = True
+except ImportError:
+    CHARTS_OK = False
+
+try:
+    from components.gags_benchmarks import (
+        REAL_WORLD_BENCHMARKS, get_benchmarks_for_domain, compare_to_benchmark,
+    )
+    BENCHMARKS_OK = True
+except ImportError:
+    BENCHMARKS_OK = False
+    REAL_WORLD_BENCHMARKS = {}
+
+
+def _safe_fmt(df, float_fmt="{:.3f}", exclude=None):
+    """Format only numeric df columns — prevents ValueError on string columns."""
+    _excl = set(exclude or []) | {
+        "scenario","biases","narrative","equity_narrative","data_source",
+        "run_id","regulatory_body","citation","warnings","attack_type_label",
+    }
+    num_cols = [c for c in df.columns
+                if c not in _excl and str(df[c].dtype).startswith(("float","int"))]
+    try:
+        return df.style.format({c: float_fmt for c in num_cols if c in df.columns})
+    except Exception:
+        return df.style
+
+
 with st.sidebar:
     language_switcher(location="sidebar")
     st.divider()
+
+    # ── State selector ────────────────────────────────────────────────────────
+    st.divider()
+    selected_state = state_selector(key="_state_03agrotechequity", location="sidebar")
+    state_info_card(selected_state)
+
     role_switcher("agrotech")
     st.divider()
 
+    # ── View Mode ────────────────────────────────────────────
+    _vm_key = "_vm_agrotech"
+    if _vm_key not in st.session_state:
+        st.session_state[_vm_key] = "Industry"
+    view_mode = st.radio("Perspective", ["Industry", "Research"],
+        horizontal=True, key=_vm_key,
+        help="Industry: KPI-first. Research: full statistical depth.")
+    st.divider()
+
     st.markdown("""<div style="text-align:center;padding:.5rem 0;">
-      <h2 style="color:#39ff7a;margin:0;">⚙️ Agrotech Config</h2>
+      <h2 style="color:#22c55e;margin:0;">⚙️ Agrotech Config</h2>
       <p style="color:#888;font-size:.82rem;">AI Bias in Agricultural Technology</p>
     </div>""", unsafe_allow_html=True)
     st.divider()
@@ -391,14 +465,14 @@ with st.sidebar:
         ["smallholder_agrotech","climate_resilient_maize",
          "irrigation_equity","market_linkage"],
         format_func=lambda k: {
-            "smallholder_agrotech":   "Smallholder Farming (Abuja FCT)",
+            "smallholder_agrotech":   "Smallholder Farming (Nigeria)",
             "climate_resilient_maize":"Climate-Resilient Maize (Plateau State)",
             "irrigation_equity":      "Irrigation Access Equity",
             "market_linkage":         "Market Linkage AI",
         }.get(k, k))
     st.divider()
 
-    st.subheader("🎭 Bias Configuration")
+    st.subheader(f"🎭 {t('bias_config')}")
     _FEATURE3_BIAS_TYPES = ["gender","linguistic"]
     _ag_valid = list(simulation_config.BIAS_TYPES) + [
         b for b in _FEATURE3_BIAS_TYPES if b not in simulation_config.BIAS_TYPES]
@@ -408,17 +482,17 @@ with st.sidebar:
     bias_intensity = st.slider("Bias Intensity", 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.3, 0.05)
     st.divider()
 
-    st.subheader("⚠️ Adversarial Attacks")
+    st.subheader(f"⚠️ {t('attack_header')}")
     poison_rate = st.slider("Poisoning Rate", 0.0, 0.5, 0.05, 0.01, format="%.2f")
     st.divider()
 
-    st.subheader("📊 Simulation Parameters")
+    st.subheader(f"📊 {t('sim_params_header')}")
     n_samples = st.number_input("Farmer Records", 500, 50000, settings.DEFAULT_N_SAMPLES, 500)
     n_runs    = st.slider("Simulation Runs", 1, 8, 3)
     include_baseline = st.toggle("Include Baseline (no bias/attack)", value=True)
     st.divider()
 
-    st.subheader("🔬 Feature Modules")
+    st.subheader(f"🔬 {t('modules_header')}")
     enable_xai           = st.toggle("Explainable AI",       value=True)
     enable_redteam       = st.toggle("Multimodal Red Team",  value=False)
     enable_governance    = st.toggle("Governance Layer",     value=True)
@@ -428,15 +502,15 @@ with st.sidebar:
     st.divider()
 
     col_r, col_x = st.columns(2)
-    run_button = col_r.button("🌾 Run", type="primary", use_container_width=True)
-    if col_x.button("🔄 Reset", use_container_width=True):
+    run_button = col_r.button(t("run_simulation"), type="primary", use_container_width=True)
+    if col_x.button(t("reset"), use_container_width=True):
         for k in list(st.session_state.keys()):
             if k.startswith("agro_"):
                 del st.session_state[k]
         st.rerun()
 
 st.markdown(
-    f"""<div class="page-header" style="--ac:#39ff7a;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#39ff7a;opacity:.55;display:inline-block;"></span>AGROTECH · GAGS v3.0 · FCT Nigeria</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Agrotech Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">AI fairness for FCT smallholder farmers — gender audit (52% female farmers), Vickrey auction agent economy, NITDA alignment.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#39ff7a;">FCT Nigeria</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#39ff7a;">52% Female Farmers</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#39ff7a;">Agent Economy</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#39ff7a;">USSD Mode</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#39ff7a;">NITDA</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#39ff7a;">UNESCO SDG2</span></div></div>""",
+    f"""<div class="page-header" style="--ac:#22c55e;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#22c55e;opacity:.55;display:inline-block;"></span>AGROTECH · GAGS v3.0 · Nigeria</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Agrotech Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">AI fairness for Nigeria smallholder farmers — gender audit (52% female farmers), Vickrey auction agent economy, NITDA alignment.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#22c55e;">Nigeria</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#22c55e;">52% Female Farmers</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#22c55e;">Agent Economy</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#22c55e;">USSD Mode</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#22c55e;">NITDA</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#22c55e;">UNESCO SDG2</span></div></div>""",
     unsafe_allow_html=True
 )
 
@@ -444,7 +518,7 @@ st.markdown(
 preset_info = AFRICA_SCENARIO_PRESETS.get("smallholder_agrotech", {})
 st.markdown(f"""
 <div class="alert-info">
-    <strong>🌍 Context:</strong> {preset_info.get('description','Abuja FCT smallholder agrotech')} 
+    <strong>🌍 Context:</strong> {preset_info.get('description','Nigeria smallholder agrotech')} 
     &nbsp;|&nbsp; Languages: {', '.join(preset_info.get('languages',['Hausa','Yoruba','Igbo','English']))} 
     &nbsp;|&nbsp; Digital inclusion baseline: {preset_info.get('digital_inclusion_baseline', 0.34):.0%} 
     &nbsp;|&nbsp; Female farmers: {preset_info.get('gender_distribution',{}).get('female',0.52):.0%} 
@@ -503,7 +577,7 @@ if run_button:
                         "poison_rate":    poison_rate,
                     },
                 )
-    prog.progress(1.0, text="Complete ✓"); prog.empty()
+    prog.progress(1.0, text=t("complete")); prog.empty()
 
     # ── Longitudinal + Federated ──────────────────────────────────────────────
     if st.session_state.agro_run_history:
@@ -563,7 +637,7 @@ if st.session_state.agro_run_history:
             {'<p style="font-size:.8rem;color:#888;margin:0;">vs baseline: ' + f"{avg_acc - base['accuracy']:+.1%}" + '</p>' if base else ''}
         </div>""", unsafe_allow_html=True)
     with k2:
-        fc = "#27ae60" if avg_fair >= 0.7 else "#e67e22" if avg_fair >= 0.5 else "#e74c3c"
+        fc = "#16a34a" if avg_fair >= 0.7 else "#e67e22" if avg_fair >= 0.5 else "#ef4444"
         st.markdown(f"""
         <div class="card-equity">
             <p style="margin:0;font-size:.8rem;color:#555;">⚖️ Fairness Score</p>
@@ -576,7 +650,7 @@ if st.session_state.agro_run_history:
             <p style="margin:0;font-size:1.8rem;font-weight:700;color:#ba7517;">{avg_rec:.1%}</p>
         </div>""", unsafe_allow_html=True)
     with k4:
-        dpc = "#e74c3c" if avg_dp > 0.1 else "#e67e22" if avg_dp > 0.05 else "#27ae60"
+        dpc = "#ef4444" if avg_dp > 0.1 else "#e67e22" if avg_dp > 0.05 else "#16a34a"
         st.markdown(f"""
         <div class="card-access">
             <p style="margin:0;font-size:.8rem;color:#555;">📊 Demographic Parity Gap</p>
@@ -895,6 +969,41 @@ if st.session_state.agro_run_history:
                     st.markdown("**Ethical Considerations:**")
                     for e_ in mc.get("ethical_considerations",[]): st.markdown(f"  • {e_}")
 
+        # ── Real-world benchmark comparison ─────────────────────
+        st.markdown("#### 📚 Real-World Benchmark Comparison")
+        if BENCHMARKS_OK:
+            _dom_bms = get_benchmarks_for_domain("agrotech")
+            if _dom_bms:
+                _bm_sel = st.selectbox(
+                        "Compare against a published study:",
+                        list(_dom_bms.keys()),
+                        format_func=lambda k: _dom_bms[k].name + " (" + str(_dom_bms[k].year) + ")",
+                        key="_agro_bm_sel")
+                _bm = _dom_bms[_bm_sel]
+                _acc_col = "accuracy" if "accuracy" in df_r.columns else ("detection_rate" if "detection_rate" in df_r.columns else None)
+                _fair_col = "fairness_score" if "fairness_score" in df_r.columns else None
+                _sim_m = {}
+                if _acc_col: _sim_m["accuracy"] = df_r[_acc_col].mean()
+                if _fair_col: _sim_m["fairness_score"] = df_r[_fair_col].mean()
+                if "fpr" in df_r.columns: _sim_m["fpr"] = df_r["fpr"].mean()
+                if "recall" in df_r.columns: _sim_m["recall"] = df_r["recall"].mean()
+                if CHARTS_OK:
+                        try:
+                            st.plotly_chart(benchmark_comparison_bar(
+                                _sim_m, _bm.metrics, _bm.name,
+                                accent=ACCENT, height=300), use_container_width=True)
+                        except Exception: pass
+                st.markdown(
+                        '<div class="nbox"><strong>Key Lesson:</strong> ' + _bm.lesson +
+                        '<br><span style="font-size:.75rem;color:#64748b">📚 ' +
+                        _bm.citation[:100] + '</span></div>',
+                        unsafe_allow_html=True)
+            else:
+                st.info("No published benchmarks available for this domain yet.")
+        else:
+            st.info("Add gags_benchmarks.py to components/ to enable benchmark comparison.")
+
+
     # ── Tab 5: Longitudinal ────────────────────────────────────────────────────
     with tab5:
         _lng = st.session_state.get("agro_longitudinal")
@@ -916,7 +1025,7 @@ if st.session_state.agro_run_history:
                 fig_lng=_pxA.line(pd.DataFrame(gm),x="generation",
                     y=["demographic_parity","fairness_score","accuracy"],
                     title="Bias Evolution Across Retraining Cycles",
-                    color_discrete_sequence=["#e74c3c","#27ae60","#3b6d11"])
+                    color_discrete_sequence=["#ef4444","#16a34a","#3b6d11"])
                 fig_lng.add_hline(y=0.1,line_dash="dot",line_color="red")
                 st.plotly_chart(fig_lng,use_container_width=True)
 
@@ -942,7 +1051,7 @@ if st.session_state.agro_run_history:
                     fig_fed=_pxB.bar(cr_df,x="client_id",
                         y=["local_accuracy","local_bias","local_fairness"],
                         barmode="group",title="Per-Region Metrics",
-                        color_discrete_sequence=["#3b6d11","#e74c3c","#27ae60"])
+                        color_discrete_sequence=["#3b6d11","#ef4444","#16a34a"])
                     st.plotly_chart(fig_fed,use_container_width=True)
 
     # ── Tab 7: Feature Modules ─────────────────────────────────────────────────
@@ -1028,7 +1137,7 @@ if st.session_state.agro_run_history:
                 fig_spend = px.bar(agents_df, x="name", y="total_spent",
                     color="strategy", title="Total Spending by Agent Strategy",
                     labels={"total_spent":"Spend","name":"Agent"},
-                    color_discrete_sequence=["#3b6d11","#e74c3c","#3498db"])
+                    color_discrete_sequence=["#3b6d11","#ef4444","#2563eb"])
                 st.plotly_chart(fig_spend, use_container_width=True)
 
             # Show auction log summary
@@ -1065,7 +1174,7 @@ if st.session_state.agro_run_history:
 
         dl1, dl2 = st.columns(2)
         with dl1:
-            st.download_button("📥 Download CSV",
+            st.download_button(t("download_csv"),
                 df_r.to_csv(index=False).encode(),
                 f"gags_agrotech_{scenario_key.lower().replace(' ','_')}.csv",
                 "text/csv", use_container_width=True)
@@ -1139,7 +1248,7 @@ else:
     c1, c2, c3 = st.columns(3)
     for col, (title, bg, desc) in zip([c1,c2,c3],[
         ("🌱 Crop failure risk",    "#3b6d11", "Plateau State maize/sorghum. Bias: geographic + climate."),
-        ("🏪 Market access",        "#ba7517", "FCT market viability. Bias: income + connectivity."),
+        ("🏪 Market access",        "#ba7517", "Nigeria market viability. Bias: income + connectivity."),
         ("💧 Resource allocation",  "#185fa5", "Fertilizer & irrigation. Agent economy active."),
     ]):
         col.markdown(
@@ -1163,6 +1272,6 @@ st.divider()
 st.markdown(
     "<div style='text-align:center;color:#7f8c8d;padding:1rem 0;'>"
     "🌾 Agrotech Equity Simulation · GAGS Framework v3.0 · "
-    "Abuja FCT · Gender Equity · Explainable AI · NITDA / UNESCO Compliance"
+    "Nigeria · Gender Equity · Explainable AI · NITDA / UNESCO Compliance"
     "</div>", unsafe_allow_html=True,
 )

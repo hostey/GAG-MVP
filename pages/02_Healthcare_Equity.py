@@ -24,6 +24,11 @@ Key improvements over previous version:
 import json
 from datetime import datetime
 import warnings
+
+# ── Auto-translation: translates ALL output to active language ───────────────
+from components.translate import install_auto_translate, tx, tx_plotly, language_switcher
+install_auto_translate()
+
 warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -61,7 +66,7 @@ from components.governance_logic import (
     simulate_federated_learning,
 )
 from utils.config import simulation_config, settings
-from components.i18n import t, get_lang, language_switcher, language_badge
+from components.i18n import t, get_lang, language_badge
 from components.ussd_simulator import ussd_interface, accessibility_gap_report, format_sms_result
 from components.nigeria_regulatory import nigeria_compliance_panel
 from components.ux_utils import (
@@ -287,6 +292,7 @@ def _train_and_score(X, y, random_state=42):
             clf, scaler, (Xtr, Xte, ytr, yte))
 
 
+@st.cache_data(show_spinner=False)
 def _run_one(
     data_source, n_samples, selected_biases, bias_intensity,
     poison_rate, access_inequality, run_idx,
@@ -453,7 +459,7 @@ with st.sidebar:
     _vm_key = "_vm_health"
     if _vm_key not in st.session_state:
         st.session_state[_vm_key] = "Industry"
-    view_mode = st.radio("Perspective", ["Industry", "Research"],
+    view_mode = st.radio(t("perspective"), ["Industry", "Research"],
         horizontal=True, key=_vm_key,
         help="Industry: KPI-first. Research: full statistical depth.")
     st.divider()
@@ -465,34 +471,33 @@ with st.sidebar:
     st.divider()
 
     st.subheader("🏥 Data Source")
-    data_source = st.selectbox(
-        "Dataset",
+    data_source = st.selectbox(t("dataset"),
         list(_pipeline.available_datasets.keys()),
         format_func=lambda k: {
             "uci_heart":            "UCI Heart Disease",
             "pima_diabetes":        "PIMA Diabetes (Women)",
             "breast_cancer":        "Breast Cancer Wisconsin",
-            "africa_centric":       "Abuja FCT (Africa-centric)",
+            "africa_centric":       "Nigeria (Africa-centric)",
             "abuja_maternal":       "Abuja Maternal Health",
             "abuja_multilingual":   "Abuja Multilingual ECG",
             "abuja_insurance":      "Abuja Insurance Access",
         }.get(k, k),
     )
-    healthcare_setting = st.selectbox("Healthcare Setting",
+    healthcare_setting = st.selectbox(t("healthcare_setting"),
         ["Primary Care", "Secondary Hospital", "Tertiary/Teaching Hospital",
          "Community Clinic", "Telemedicine"])
-    prediction_task = st.selectbox("Prediction Task",
+    prediction_task = st.selectbox(t("prediction_task"),
         ["Disease Risk Screening", "Readmission Risk", "Diagnosis Support",
          "Treatment Recommendation", "Triage Priority"])
-    region = st.selectbox("Region",
-        ["Abuja FCT (Nigeria)", "Lagos (Nigeria)", "Sub-Saharan Africa",
+    region = st.selectbox(t("region"),
+        ["Abuja FCT (Nigeria)", "Lagos (Nigeria)","Kano (Nigeria)","Anambra (Nigeria)" "Sub-Saharan Africa",
          "South Asia", "Global (Generic)"])
     st.divider()
 
     st.subheader("👥 Patient Demographics")
-    low_income_ratio = st.slider("Low-Income Patients", 0.0, 1.0, 0.40, 0.05,
+    low_income_ratio = st.slider(t("low_income_patients"), 0.0, 1.0, 0.40, 0.05,
         help="Fraction of patients from low-income backgrounds")
-    uninsured_ratio  = st.slider("Uninsured Patients",  0.0, 1.0, 0.35, 0.05,
+    uninsured_ratio  = st.slider(t("uninsured_patients"),  0.0, 1.0, 0.35, 0.05,
         help="Fraction of patients without health insurance")
     st.divider()
 
@@ -500,31 +505,31 @@ with st.sidebar:
     _hc_valid = list(simulation_config.BIAS_TYPES) + [
         b for b in ["gender","linguistic"] if b not in simulation_config.BIAS_TYPES]
     _hc_defaults = [b for b in ["demographic","socioeconomic","gender"] if b in _hc_valid]
-    selected_biases = st.multiselect("Bias Types", options=_hc_valid, default=_hc_defaults,
+    selected_biases = st.multiselect(t("bias_types"), options=_hc_valid, default=_hc_defaults,
         format_func=lambda x: f"🔴 {x}" if x in ("gender","demographic") else f"⚠️ {x}")
-    bias_intensity = st.slider("Bias Intensity", 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.25, 0.05)
-    access_inequality = st.slider("Access Inequality", 0.0, 1.0, 0.3, 0.05,
+    bias_intensity = st.slider(t("bias_intensity"), 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.25, 0.05)
+    access_inequality = st.slider(t("access_inequality"), 0.0, 1.0, 0.3, 0.05,
         help="Fraction of patients with reduced access to care")
     st.divider()
 
     st.subheader(f"⚠️ {t('attack_header')}")
-    poison_rate = st.slider("Poisoning Rate", 0.0, 0.5, 0.05, 0.01, format="%.2f")
+    poison_rate = st.slider(t("poisoning_rate"), 0.0, 0.5, 0.05, 0.01, format="%.2f")
     st.divider()
 
     st.subheader(f"📊 {t('sim_params_header')}")
-    sample_size = st.number_input("Sample Size", 500, 50000, settings.DEFAULT_N_SAMPLES, 500)
-    n_runs = st.slider("Simulation Runs", 1, 8, 3)
+    sample_size = st.number_input(t("sample_size"), 500, 50000, settings.DEFAULT_N_SAMPLES, 500)
+    n_runs = st.slider(t("simulation_runs"), 1, 8, 3)
     st.divider()
 
     st.subheader(f"🔬 {t('modules_header')}")
-    enable_redteam      = st.toggle("Multimodal Red Team",   value=False)
-    enable_governance   = st.toggle("Governance Layer",      value=True)
-    governance_policy   = st.selectbox("Governance Policy",
+    enable_redteam      = st.toggle(t("multimodal_red_team"),   value=False)
+    enable_governance   = st.toggle(t("governance_layer"),      value=True)
+    governance_policy   = st.selectbox(t("governance_policy"),
         ["majority_vote","supermajority","consensus","weighted_expert"],
         disabled=not enable_governance)
-    enable_arena        = st.toggle("Strategic Arena",       value=False)
-    enable_agent_economy= st.toggle("Agent Economy",         value=False)
-    enable_gender_audit = st.toggle("Gender Equity Audit",   value=True)
+    enable_arena        = st.toggle(t("strategic_arena"),       value=False)
+    enable_agent_economy= st.toggle(t("agent_economy"),         value=False)
+    enable_gender_audit = st.toggle(t("gender_equity_audit"),   value=True)
     st.divider()
 
     col_r, col_x = st.columns(2)
@@ -541,7 +546,7 @@ with st.sidebar:
 
 
 st.markdown(
-    f"""<div class="page-header" style="--ac:#0891b2;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#0891b2;opacity:.55;display:inline-block;"></span>HEALTHCARE · GAGS v3.0 · Abuja FCT</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Healthcare Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">Test AI diagnostic bias across income, gender, and insurance status — real UCI/PIMA datasets calibrated to Abuja FCT demographics.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">UCI Heart Disease</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">PIMA Diabetes</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Abuja FCT Scenarios</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">WHO AI Ethics</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Gender Equity Audit</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Multilingual</span></div></div>""",
+    f"""<div class="page-header" style="--ac:#0891b2;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#0891b2;opacity:.55;display:inline-block;"></span>HEALTHCARE · GAGS v3.0 ·</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Healthcare Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">Test AI diagnostic bias across income, gender, and insurance status — real UCI/PIMA datasets calibrated to Nigeria centric demographics.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">UCI Heart Disease</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">PIMA Diabetes</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Nigeria Scenarios</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">WHO AI Ethics</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Gender Equity Audit</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Multilingual</span></div></div>""",
     unsafe_allow_html=True
 )
 
@@ -608,7 +613,7 @@ if st.session_state.health_run_history:
     info  = st.session_state.health_dataset_info
 
     # ── KPI row ───────────────────────────────────────────────────────────────
-    st.markdown("## 📊 Healthcare Equity Dashboard")
+    st.markdown(t("healthcare_equity_dashboard"))
     role_banner("health")
 
     if info:
@@ -737,7 +742,7 @@ if st.session_state.health_run_history:
 
     # ── Tab 2: Equity ─────────────────────────────────────────────────────────
     with tab2:
-        st.markdown("### ⚖️ Health Equity Gap Analysis")
+        st.markdown(t("health_equity_gap_analysis"))
 
         df["acc_gap"]  = (df["acc_hi"]  - df["acc_lo"]).abs()
         df["sens_gap"] = (df["sens_hi"] - df["sens_lo"]).abs()
@@ -764,7 +769,7 @@ if st.session_state.health_run_history:
         # ── Feature 3: Gender Audit ───────────────────────────────────────────
         if "gender_audit" in feats:
             ga = feats["gender_audit"]
-            st.markdown("#### 🌍 Gender Equity Audit (Feature 3 — UNESCO Women4EthicalAI)")
+            st.markdown(t("gender_equity_audit_feature_3_unesco_women4ethical"))
             passed_icon = "✅" if ga["audit_passed"] else "❌"
             g1, g2, g3 = st.columns(3)
             g1.metric("Gender Gap",          f"{ga['overall_gender_gap']:.3f}")
@@ -799,7 +804,7 @@ if st.session_state.health_run_history:
 
     # ── Tab 3: Clinical Impact ────────────────────────────────────────────────
     with tab3:
-        st.markdown("### 🏥 Clinical Impact by Patient Group")
+        st.markdown(t("clinical_impact_by_patient_group"))
 
         groups  = ["Low-Income","Uninsured","Rural","Minority","General"]
         det_r   = [max(0, np.random.uniform(0.6, 0.8) * (1 - bias_intensity * 0.3)) for _ in groups[:-1]] + [np.random.uniform(0.8, 0.95)]
@@ -821,7 +826,7 @@ if st.session_state.health_run_history:
         st.plotly_chart(fig_clin, use_container_width=True)
 
         # Resource allocation
-        st.markdown("#### 🏥 Healthcare Resource Access")
+        st.markdown(t("healthcare_resource_access"))
         resources = ["Preventive Care","Specialist Access","Diagnostics","Medications","Follow-up"]
         lo_alloc  = [max(0, 0.3 * (1 - access_inequality)) for _ in resources]
         hi_alloc  = [0.75, 0.80, 0.90, 0.85, 0.80]
@@ -835,11 +840,11 @@ if st.session_state.health_run_history:
 
     # ── Tab 4: Feature Modules ────────────────────────────────────────────────
     with tab4:
-        st.markdown("### 🔬 Advanced Feature Module Results")
+        st.markdown(t("advanced_feature_module_results"))
 
         # ── Feature 2: Multimodal Red Team ────────────────────────────────────
         if "multimodal_redteam" in feats:
-            st.markdown("#### Feature 2 — Multimodal Red Teaming")
+            st.markdown(t("feature_2_multimodal_red_teaming"))
             rt = feats["multimodal_redteam"]
             rt_rows = []
             for r in rt.get("modality_results", []):
@@ -870,7 +875,7 @@ if st.session_state.health_run_history:
 
         # ── Feature 1: Agent Economy ──────────────────────────────────────────
         if "agent_economy" in feats:
-            st.markdown("#### Feature 1 — AI Agent Economy (Healthcare Resources)")
+            st.markdown(t("feature_1_ai_agent_economy_healthcare_resources"))
             ae = feats["agent_economy"]
             st.metric("Economy Stability",  ae.get("economy_stability","—"))
             st.metric("Permeability Score", f"{ae.get('permeability_score',0):.4f}")
@@ -882,7 +887,7 @@ if st.session_state.health_run_history:
 
         # ── Feature 4: Governance Ledger ──────────────────────────────────────
         if "governance" in feats:
-            st.markdown("#### Feature 4 — Hybrid Governance Ledger (Blockchain-style)")
+            st.markdown(t("feature_4_hybrid_governance_ledger_blockchain_styl"))
             gov = feats["governance"]
             st.markdown(f"""
             <div class="ledger-row">
@@ -895,7 +900,7 @@ if st.session_state.health_run_history:
 
         # ── Feature 5: Strategic Arena ────────────────────────────────────────
         if "strategic_arena" in feats:
-            st.markdown("#### Feature 5 — Strategic Social Reasoning Arena")
+            st.markdown(t("feature_5_strategic_social_reasoning_arena"))
             arena = feats["strategic_arena"]
             standings = pd.DataFrame(arena.get("final_standings", []))
             if not standings.empty:
@@ -916,7 +921,7 @@ if st.session_state.health_run_history:
 
     # ── Tab 5: Data Analysis ──────────────────────────────────────────────────
     with tab5:
-        st.markdown("### 📊 Data Quality & Source Analysis")
+        st.markdown(t("data_quality_source_analysis"))
 
         c1, c2 = st.columns(2)
         with c1:
@@ -947,7 +952,7 @@ if st.session_state.health_run_history:
             st.markdown("""
             <div class="alert-info">
                 <strong>🌍 Africa-Centric Scenario Active (Feature 3)</strong><br>
-                Dataset uses Abuja FCT parameters: lower income mean, multilingual context,
+                Dataset Nigeria centric parameters: lower income mean, multilingual context,
                 reduced digital connectivity baseline, and gender-stratified demographics.
                 UNESCO Women4EthicalAI audit is available in the Equity tab.
             </div>""", unsafe_allow_html=True)
@@ -975,7 +980,7 @@ if st.session_state.health_run_history:
             with cl:
                 expl = _xai.get("instance_explanation", {})
                 if expl:
-                    st.markdown("#### Instance Explanation")
+                    st.markdown(t("instance_explanation"))
                     st.markdown(f'<div class="alert-info"><em>{expl.get("decision_path","")}</em></div>', unsafe_allow_html=True)
                     c_ = expl.get("feature_contributions", {})
                     if c_:
@@ -994,7 +999,7 @@ if st.session_state.health_run_history:
                         st.dataframe(pd.DataFrame([{"Feature":k,"Original":v[0],"New":v[1],"Δ":round(v[1]-v[0],3)} for k,v in ch.items()]), use_container_width=True)
             ix = _xai.get("intersectional", {})
             if ix and ix.get("group_performances"):
-                st.markdown("#### Intersectional Fairness")
+                st.markdown(t("intersectional_fairness"))
                 st.markdown(f'<div class="alert-info">{ix.get("narrative","")}</div>', unsafe_allow_html=True)
                 ix_df = pd.DataFrame([{"Group":k,**{kk:round(vv,3) for kk,vv in v.items()}} for k,v in ix["group_performances"].items()])
                 st.dataframe(ix_df.style.background_gradient(subset=["accuracy"], cmap="RdYlGn"), use_container_width=True)
@@ -1003,7 +1008,7 @@ if st.session_state.health_run_history:
         _xai = st.session_state.get("health_xai_results", {})
         _cr = _xai.get("compliance_report", {})
         _mc = _xai.get("model_card", {})
-        st.markdown("### 📋 Regulatory Compliance Report")
+        st.markdown(t("regulatory_compliance_report"))
         if not _cr:
             st.info("Run a simulation to generate the compliance report.")
         else:
@@ -1022,12 +1027,11 @@ if st.session_state.health_run_history:
                 st.caption(f"PDF unavailable: {_e}")
 
         # ── Real-world benchmark comparison ─────────────────────
-        st.markdown("#### 📚 Real-World Benchmark Comparison")
+        st.markdown(t("real_world_benchmark_comparison"))
         if BENCHMARKS_OK:
             _dom_bms = get_benchmarks_for_domain("healthcare")
             if _dom_bms:
-                _bm_sel = st.selectbox(
-                        "Compare against a published study:",
+                _bm_sel = st.selectbox(t("compare_against_a_published_study"),
                         list(_dom_bms.keys()),
                         format_func=lambda k: _dom_bms[k].name + " (" + str(_dom_bms[k].year) + ")",
                         key="_health_bm_sel")
@@ -1058,7 +1062,7 @@ if st.session_state.health_run_history:
 
     with tab8:
         _lng = st.session_state.get("health_longitudinal")
-        st.markdown("### 🔁 Longitudinal Bias Analysis")
+        st.markdown(t("longitudinal_bias_analysis"))
         st.markdown('<div class="alert-info">Simulates the <strong>feedback loop</strong>: biased predictions replace training labels over successive retraining cycles, potentially making bias self-reinforcing.</div>', unsafe_allow_html=True)
         if not _lng:
             st.info("Run a simulation to see longitudinal bias evolution.")
@@ -1083,7 +1087,7 @@ if st.session_state.health_run_history:
 
     with tab9:
         _fed = st.session_state.get("health_federated")
-        st.markdown("### 🌐 Federated Learning Simulation")
+        st.markdown(t("federated_learning_simulation"))
         st.markdown('<div class="alert-info">Tests whether bias persists when training is <strong>distributed across multiple hospitals</strong> without centralising patient data (FedAvg).</div>', unsafe_allow_html=True)
         if not _fed:
             st.info("Run a simulation to see federated learning results.")
@@ -1176,7 +1180,7 @@ if st.session_state.health_run_history:
 
     # ── Policy recommendations ────────────────────────────────────────────────
     st.divider()
-    st.markdown("## 💡 Policy Recommendations")
+    st.markdown(t("policy_recommendations"))
 
     if info.get("is_africa"):
         st.markdown("""
@@ -1228,7 +1232,7 @@ if st.session_state.health_run_history:
 # Welcome screen (no results yet)
 # ═══════════════════════════════════════════════════════════════════════════════
 else:
-    st.markdown("## 🏥 Welcome to Healthcare Equity Simulation")
+    st.markdown(t("welcome_to_healthcare_equity_simulation"))
     st.markdown("""
     Configure your scenario in the sidebar and click **Run** to begin.
     This module integrates all five GAGS v3.0 feature upgrades alongside the
@@ -1252,7 +1256,7 @@ else:
     for col, (title, cls, desc) in zip([c4, c5], extra_cards):
         col.markdown(f'<div class="{cls}"><strong>{title}</strong><p style="font-size:.87rem;margin:.5rem 0 0;">{desc}</p></div>', unsafe_allow_html=True)
 
-    with st.expander("📖 How to Use", expanded=False):
+    with st.expander(t("how_to_use"), expanded=False):
         st.markdown("""
         1. **Select a data source** — synthetic, real-world (UCI/PIMA/WBC), hybrid, or Abuja Africa-centric
         2. **Enable feature modules** in the sidebar (Multimodal Red Team, Governance, Arena, Agent Economy, Gender Audit)

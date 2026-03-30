@@ -18,6 +18,8 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
+from components.translate import install_auto_translate, tx, tx_plotly, language_switcher
+install_auto_translate()
 
 from components.governance_logic import (
     apply_bias, simulate_data_poisoning, calculate_fairness_metrics,
@@ -34,7 +36,8 @@ from components.ux_utils import (
     board_member_summary,
 )
 from components.pdf_report import generate_pdf_compliance_report
-from components.i18n import t, get_lang, language_switcher
+from components.i18n import t, get_lang
+from components.nigeria_states import state_selector, state_info_card, get_state_params, apply_state_to_preset
 try:
     from components.nigeria_regulatory import nigeria_compliance_panel
 except ImportError:
@@ -103,7 +106,7 @@ _VALID_BIAS_TYPES_EDU = list(simulation_config.BIAS_TYPES) + [
     b for b in ["gender","linguistic","geographic"] if b not in simulation_config.BIAS_TYPES]
 
 def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
-             poison_rate, run_idx, enable_xai, enable_governance):
+             poison_rate, run_idx, enable_xai, enable_governance, selected_state=selected_state):
     from components.governance_logic import (
         generate_education_data, calculate_education_equity,
         apply_bias, simulate_data_poisoning, calculate_fairness_metrics,
@@ -112,6 +115,7 @@ def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
     )
     X, y, demo, feat_names, preset = generate_education_data(
         scenario_key, n_samples, random_state=42 + run_idx)
+    preset = apply_state_to_preset(preset, selected_state)
     X = X.astype(np.float64)
     for bt in [b for b in selected_biases if b in _VALID_BIAS_TYPES_EDU]:
         try:
@@ -128,7 +132,7 @@ def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
     scaler = StandardScaler(); Xs = scaler.fit_transform(X)
     Xtr, Xte, ytr, yte, gtr, gte = train_test_split(
         Xs, y, demo, test_size=0.3, random_state=42 + run_idx,
-        stratify=y if len(np.unique(y)) > 1 else None)
+        stratify=y if (len(np.unique(y)) > 1 and np.bincount(y.astype(int)).min() >= 2) else None)
     clf = GradientBoostingClassifier(n_estimators=100, max_depth=4,
         learning_rate=0.08, random_state=42 + run_idx)
     clf.fit(Xtr, ytr); yp = clf.predict(Xte)
@@ -220,6 +224,12 @@ def _safe_fmt(df, float_fmt="{:.3f}", exclude=None):
 with st.sidebar:
     language_switcher(location="sidebar")
     st.divider()
+
+    # ── State selector ────────────────────────────────────────────────────────
+    st.divider()
+    selected_state = state_selector(key="_state_07educationequity", location="sidebar")
+    state_info_card(selected_state)
+
     role_switcher("health")
     st.divider()
 
@@ -232,7 +242,7 @@ with st.sidebar:
     st.caption(preset_info.description[:200])
     st.divider()
 
-    st.subheader("🎭 Bias Configuration")
+    st.subheader(f"🎭 {t('bias_config')}")
     _edu_valid = list(dict.fromkeys(
         list(simulation_config.BIAS_TYPES) +
         ["demographic", "socioeconomic", "geographic", "gender", "linguistic"]))
@@ -244,17 +254,17 @@ with st.sidebar:
         "Bias Intensity", 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.30, 0.05)
     st.divider()
 
-    st.subheader("⚠️ Adversarial Attacks")
+    st.subheader(f"⚠️ {t('attack_header')}")
     poison_rate = st.slider("Poisoning Rate", 0.0, 0.5, 0.05, 0.01, format="%.2f")
     st.divider()
 
-    st.subheader("📊 Simulation")
+    st.subheader(f"📊 {t('sim_params_header')}")
     n_samples = st.number_input(
         "Records", 1000, 50000, settings.DEFAULT_N_SAMPLES, 1000)
     n_runs = st.slider("Runs", 1, 8, 3)
     st.divider()
 
-    st.subheader("📊 View Mode")
+    st.subheader(f"📊 {t('view_mode_header')}")
     _vm_key = "_view_mode_education"
     if _vm_key not in st.session_state:
         st.session_state[_vm_key] = "Industry"
@@ -262,14 +272,14 @@ with st.sidebar:
         horizontal=True, key=_vm_key,
         help="Industry: KPIs first. Research: statistical depth.")
     st.divider()
-    st.subheader("🔬 Modules")
+    st.subheader(f"🔬 {t('modules_header')}")
     enable_xai        = st.toggle("Explainable AI",   value=True)
     enable_governance = st.toggle("Governance Layer", value=True)
     st.divider()
 
     col_r, col_x = st.columns(2)
-    run_btn = col_r.button("🎓 Run", type="primary", use_container_width=True)
-    if col_x.button("🔄 Reset", use_container_width=True):
+    run_btn = col_r.button(t("run_simulation"), type="primary", use_container_width=True)
+    if col_x.button(t("reset"), use_container_width=True):
         for _k, _v in _EDU_STATE.items():
             st.session_state[_k] = type(_v)()
         st.rerun()
@@ -279,7 +289,7 @@ with st.sidebar:
 
 
 st.markdown(
-    f"""<div class="page-header" style="--ac:#ffe234;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#ffe234;opacity:.55;display:inline-block;"></span>EDUCATION · GAGS v3.0 · Nigeria FCT</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Education Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">JAMB/WAEC admission AI, dropout prediction, automated grading bias — gender gap, urban-rural divide, coaching access inequity.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">JAMB/WAEC</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">Dropout Prediction</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">Gender Gap</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">SES Gap</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">Urban-Rural</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">UNESCO SDG4</span></div></div>""",
+    f"""<div class="page-header" style="--ac:#ffe234;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#ffe234;opacity:.55;display:inline-block;"></span>EDUCATION · GAGS v3.0 · Nigeria</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Education Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">JAMB/WAEC admission AI, dropout prediction, automated grading bias — gender gap, urban-rural divide, coaching access inequity.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">JAMB/WAEC</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">Dropout Prediction</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">Gender Gap</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">SES Gap</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">Urban-Rural</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ffe234;">UNESCO SDG4</span></div></div>""",
     unsafe_allow_html=True
 )
 
@@ -297,7 +307,7 @@ st.markdown(f"""
 # ── Run ────────────────────────────────────────────────────────────────────────
 if run_btn:
     st.session_state.edu_run_history = []
-    prog = st.progress(0, text="Initialising…")
+    prog = st.progress(0, text=t("loading"))
     for i in range(n_runs):
         prog.progress(i/n_runs, text=f"Run {i+1}/{n_runs}…")
         with st.spinner(f"Simulation {i+1}/{n_runs}"):
@@ -311,10 +321,11 @@ if run_btn:
                              "opportunity_gap":r["opportunity_gap"],"gender_gap":r["gender_gap"]},
                     config={"scenario_key":scenario_key,"bias_intensity":bias_intensity,
                             "poison_rate":poison_rate,"selected_biases":selected_biases})
-    prog.progress(1.0, text="Complete ✓"); prog.empty()
+    prog.progress(1.0, text=t("complete")); prog.empty()
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 if st.session_state.edu_run_history:
+    df: pd.DataFrame = pd.DataFrame()  # safe default; overwritten below
     df    = pd.DataFrame(st.session_state.edu_run_history)
     xai   = st.session_state.edu_xai_results
     lng_  = st.session_state.edu_longitudinal
@@ -562,6 +573,13 @@ if st.session_state.edu_run_history:
                     fig_lng.add_hline(y=0.1, line_dash="dot", line_color="red",
                                       annotation_text="Acceptable parity threshold (10%)")
                     st.plotly_chart(fig_lng, use_container_width=True)
+                    if CHARTS_OK:
+                        try:
+                            st.plotly_chart(animated_bias_drift(
+                                gm, accent=ACCENT, height=380,
+                                title="Animated: Bias Drift Across Retraining Cycles",
+                            ), use_container_width=True)
+                        except Exception: pass
 
         with tab6:
             st.markdown("### 🌐 Federated Learning Simulation")
@@ -648,10 +666,10 @@ if st.session_state.edu_run_history:
                 st.dataframe(df[show_cols], use_container_width=True)
             d1,d2 = st.columns(2)
             with d1:
-                st.download_button("📥 Download CSV", df.to_csv(index=False).encode(),
+                st.download_button(t("download_csv"), df.to_csv(index=False).encode(),
                     f"gags_education_{scenario_key}.csv","text/csv",use_container_width=True)
             with d2:
-                st.download_button("📋 Export Config", json.dumps({
+                st.download_button(t("export_config"), json.dumps({
                     "scenario":scenario_key,"bias_intensity":bias_intensity,
                     "selected_biases":selected_biases,"n_samples":n_samples},indent=2),
                     "education_config.json","application/json",use_container_width=True)

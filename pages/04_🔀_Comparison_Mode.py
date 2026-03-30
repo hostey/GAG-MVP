@@ -33,7 +33,7 @@ from utils.config import simulation_config, settings
 
 st.set_page_config(
     page_title="Comparison Mode • GAGS",
-    page_icon="🔀", layout="wide",
+    page_icon="", layout="wide",
 )
 
 try:
@@ -340,7 +340,7 @@ def _pv(key, default):
 with st.sidebar:
     st.markdown("""<div style="text-align:center;padding:.5rem 0 1rem">
       <h2 style="color:var(--ac,#38bdf8);margin:0;font-family:var(--ff-d,'Syne',sans-serif)">
-        🔀 Comparison Mode</h2>
+         Comparison Mode</h2>
       <p style="color:var(--t2,#5a6a85);font-size:.78rem;margin:.3rem 0 0;
          font-family:var(--ff-m,'DM Mono',monospace)">
         Configure Slot A and Slot B independently</p>
@@ -426,7 +426,7 @@ with st.sidebar:
 st.markdown(f"""
 <div class="page-header fade-in">
   <p class="eyebrow">GAGS · Comparison Mode · All 7 Domains</p>
-  <h1>🔀 Head-to-Head Simulation Comparison</h1>
+  <h1> Head-to-Head Simulation Comparison</h1>
   <p>Run any two simulations side-by-side — same domain different settings,
      or entirely different domains. Every metric diffed, every gap quantified.</p>
   <div style="margin-top:.75rem">
@@ -461,7 +461,7 @@ if not res_a or not res_b:
     st.markdown("""
 <div style="background:var(--bg1);border:1px solid var(--bg3);border-radius:12px;
   padding:2.5rem;text-align:center;margin-top:1rem">
-  <p style="font-size:2.5rem;margin:0 0 .75rem">🔀</p>
+  <p style="font-size:2.5rem;margin:0 0 .75rem"></p>
   <p style="font-family:var(--ff-d);font-size:1.3rem;font-weight:700;
      color:var(--t0);margin:0 0 .5rem">Configure &amp; Run a Comparison</p>
   <p style="color:var(--t2);font-size:.88rem;max-width:520px;margin:0 auto">
@@ -910,5 +910,5 @@ st.divider()
 st.markdown(
     "<div style='text-align:center;color:var(--t2);font-family:var(--ff-m);"
     "font-size:.7rem;padding:.5rem 0;letter-spacing:.05em'>"
-    "🔀 COMPARISON MODE · GAGS v4.0 · All 7 Domains · Configurable Diff Engine"
+    "COMPARISON MODE · GAGS v4.0 · All 7 Domains · Configurable Diff Engine"
     "</div>", unsafe_allow_html=True)
