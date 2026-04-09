@@ -22,15 +22,27 @@ import io
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    HRFlowable, PageBreak,
-)
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+        HRFlowable, PageBreak,
+    )
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+    REPORTLAB_OK = True
+except ImportError:
+    REPORTLAB_OK = False
+
+
+def _generate_pdf_compliance_report(*args, **kwargs):
+    """Stub: returns None if reportlab is not installed."""
+    if not REPORTLAB_OK:
+        return None
+    return _generate_pdf_compliance_report(*args, **kwargs)
+
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 _NAVY    = colors.HexColor("#1a2e4a")
@@ -227,7 +239,7 @@ def _framework_table(fw_name: str, fw_data: Dict, styles):
     return t
 
 
-def generate_pdf_compliance_report(
+def _generate_pdf_compliance_report(
     compliance_report: Dict[str, Any],
     model_card: Optional[Dict[str, Any]] = None,
     simulation_metadata: Optional[Dict[str, Any]] = None,

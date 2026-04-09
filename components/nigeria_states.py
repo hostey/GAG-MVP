@@ -595,7 +595,7 @@ def apply_state_to_preset(preset, state_name: str):
 
 def state_selector(
     key: str = "_selected_state",
-    label: str = " State / Region",
+    label: str = "📍 State / Region",
     include_national: bool = True,
     location: str = "sidebar",
 ) -> str:
@@ -659,25 +659,33 @@ def state_selector(
 
 def state_info_card(state_name: str) -> None:
     """
-    Render a compact info card showing key indicators for the selected state.
-    Call after state_selector() to give users context before running.
-    """
-    profile = get_state_params(state_name)
+    Render state info card — automatically uses live World Bank data
+    when available, falls back to static estimates otherwise.
 
+    Shows a 🔴 LIVE badge when real-time data is successfully fetched,
+    or a 📚 STATIC badge when using calibrated survey estimates.
+    """
+    try:
+        from components.live_data import live_state_info_card
+        live_state_info_card(state_name, show_live_badge=True)
+    except ImportError:
+        # Fallback to simple static card if live_data not available
+        _static_state_info_card(state_name)
+
+
+def _static_state_info_card(state_name: str) -> None:
+    """Simple static fallback card with no live data."""
+    profile = get_state_params(state_name)
     is_national = state_name in ("Nigeria (National Average)", "Nigeria", "", None)
     title = "🇳🇬 National Average" if is_national else f"📍 {profile.name}"
-    zone_full = {
-        "NW": "North-West", "NE": "North-East", "NC": "North-Central",
-        "SW": "South-West", "SE": "South-East",  "SS": "South-South",
-        "All": "All Zones",
-    }.get(profile.geopolitical_zone, profile.geopolitical_zone)
-
-    # Colour code zone
     zone_colour = {
         "NW": "#dc2626", "NE": "#ea580c", "NC": "#d97706",
         "SW": "#16a34a", "SE": "#0891b2", "SS": "#7c3aed", "All": "#334155",
     }.get(profile.geopolitical_zone, "#334155")
-
+    zone_full = {
+        "NW": "North-West", "NE": "North-East", "NC": "North-Central",
+        "SW": "South-West", "SE": "South-East", "SS": "South-South", "All": "All Zones",
+    }.get(profile.geopolitical_zone, profile.geopolitical_zone)
     st.markdown(
         f"""<div style="background:#f8fafc;border:1px solid #e2e8f0;
         border-left:4px solid {zone_colour};border-radius:8px;
@@ -698,6 +706,6 @@ def state_info_card(state_name: str) -> None:
         <span>📚 Literacy: <b>{profile.literacy_rate:.1%}</b></span>
         </div>
         {f'<p style="margin:6px 0 0;font-size:.68rem;color:#94a3b8;font-style:italic;">{profile.notes}</p>' if profile.notes else ''}
-        """,
+        </div>""",
         unsafe_allow_html=True,
     )

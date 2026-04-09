@@ -1,4 +1,4 @@
-# pages/04_🔀_Comparison_Mode.py
+# pages/Comparison_Mode.py
 """
 GAGS Comparison Mode v4.0
 Compare any two simulations side-by-side across all 7 domains.

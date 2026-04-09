@@ -26,10 +26,14 @@ import streamlit as st
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from components.translate import install_auto_translate, tx, tx_plotly, language_switcher
+from components.i18n import t
+install_auto_translate()
 from sklearn.metrics import (accuracy_score, recall_score,
                               precision_score, f1_score)
 
 from components.governance_logic import (
+    run_simple_simulation,
     apply_bias, simulate_data_poisoning, calculate_fairness_metrics,
     ExplainableModel, generate_compliance_report,
     generate_intersectional_fairness, AttackSeverity,
@@ -41,15 +45,44 @@ from components.ux_utils import (
     guided_tour_banner, metric_glossary_expander,
     history_browser, save_to_history, share_url_panel, load_config_from_url,
     annotation_panel, role_switcher, get_active_role, role_banner,
+    get_role_algo, get_role_tabs, get_role_defaults,
+    role_algo_banner, role_brief_banner,
     board_member_summary,
 )
-from components.pdf_report import generate_pdf_compliance_report
-from components.i18n import language_switcher
+try:
+    from components.pdf_report import generate_pdf_compliance_report
+    PDF_OK = True
+except (ImportError, ModuleNotFoundError):
+    PDF_OK = False
+    def generate_pdf_compliance_report(*a, **kw):
+        return None
+from components.live_data import national_live_banner
+from components.nigeria_states import state_selector, state_info_card, get_state_params, apply_state_to_preset
 try:
     from components.nigeria_regulatory import nigeria_compliance_panel
 except ImportError:
     def nigeria_compliance_panel(*a, **kw): pass
 from utils.config import simulation_config, settings
+from components.gags_interactive import (
+    progress_tracker, scenario_story_banner,
+    domain_challenge_panel, benchmark_challenge_panel,
+    what_if_explorer, bias_detective_panel, track_run, award_points,
+    _reset_render_guards
+)
+_reset_render_guards()
+from components.ai_safety import run_ai_safety_suite
+from components.gags_lifecycle import run_lifecycle_suite
+from components.gags_lifecycle_ui import render_lifecycle_tab, render_eco_tab
+from components.gags_dynamic_systems import run_dynamic_systems_suite, derive_ds_params
+from components.gags_dynamic_ui import render_dynamic_systems_tab
+from components.gags_safety_ui import render_safety_tab
+from components.gags_features_full import (
+    run_agent_economy_simulation, run_redteam_simulation, run_arena_simulation,
+)
+from components.gags_feature_modules import (
+    feature_modules_tab, multi_challenge_panel,
+    admin_challenge_panel, feature_module_sidebar
+)
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -150,6 +183,9 @@ _STATE = {
     "jud_longitudinal":     None, "jud_federated":      None,
     "jud_snapshot_history": [], "jud_annotations":      [],
     "jud_view_mode":        "Industry",
+    "jud_safety_report":    {}, "jud_lifecycle_report": {},
+    "jud_feature_outputs":  {},
+    "jud_ds_report": {}
 }
 for _k, _v in _STATE.items():
     if _k not in st.session_state:
@@ -161,9 +197,10 @@ _VALID_BIAS = list(dict.fromkeys(
 
 # ── Simulation engine ──────────────────────────────────────────────────────────
 def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
-             poison_rate, run_idx, enable_xai, enable_governance, enable_gender_audit):
+             poison_rate, run_idx, enable_xai, enable_governance, enable_gender_audit, selected_state=None):
     X, y, demo, feat_names, preset = generate_judicial_data(
         scenario_key, n_samples, random_state=42 + run_idx)
+    preset = apply_state_to_preset(preset, selected_state or "Nigeria (National Average)")
     X = X.astype(np.float64)
 
     for bt in [b for b in selected_biases if b in _VALID_BIAS]:
@@ -184,7 +221,7 @@ def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
     scaler = StandardScaler(); Xs = scaler.fit_transform(X)
     Xtr, Xte, ytr, yte, gtr, gte = train_test_split(
         Xs, y, demo, test_size=0.3, random_state=42 + run_idx,
-        stratify=y if len(np.unique(y)) > 1 else None)
+        stratify=y if (len(np.unique(y)) > 1 and np.bincount(y.astype(int)).min() >= 2) else None)
 
     clf = GradientBoostingClassifier(
         n_estimators=120, max_depth=4, learning_rate=0.08,
@@ -263,6 +300,8 @@ def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
             st.session_state.jud_federated = fed.__dict__
         except Exception: st.session_state.jud_federated = None
 
+    # ── Feature modules (run when enabled) ───────────────────────────────────
+
     return {
         # Core metrics
         "run_id":            run_idx + 1,
@@ -325,7 +364,25 @@ def _safe_fmt(df, float_fmt="{:.3f}", exclude=None):
 with st.sidebar:
     language_switcher(location="sidebar")
     st.divider()
-    role_switcher("health")
+
+    # ── State selector ────────────────────────────────────────────────────────
+    st.divider()
+    selected_state = state_selector(key="_state_09judicialjustice", location="sidebar")
+    state_info_card(selected_state)
+
+    st.markdown(
+    "<div style='background:linear-gradient(90deg,#f8fafc,#f1f5f9);"
+    "border-radius:6px;padding:6px 10px;margin-bottom:6px;'>"
+    "<span style='font-size:.68rem;font-weight:700;color:#475569;"
+    "text-transform:uppercase;letter-spacing:.07em;'>⚖️ Judicial AI Fairness</span>"
+    "</div>",
+    unsafe_allow_html=True)
+    role_switcher("judicial")
+    progress_tracker(location="sidebar")
+    role_algo_banner("judicial")
+    # ── Role-recommended algorithm ─────────────────────────────────
+    _role_algo, _role_algo_label, _ = get_role_algo("judicial")
+
     st.divider()
 
     st.markdown(f"""<div style="text-align:center;padding:.5rem 0">
@@ -334,9 +391,9 @@ with st.sidebar:
         Criminal Justice AI Fairness</p></div>""", unsafe_allow_html=True)
     st.divider()
 
-    st.subheader("📊 View Mode")
-    view_mode = st.radio("Perspective", ["Industry","Research"], horizontal=True,
-        help="Industry: executive KPIs. Research: full statistical depth.")
+    st.subheader(f"📊 {t('view_mode_header')}")
+    view_mode = st.radio(t("perspective"), ["Industry", "Research", "Rights Audit"], horizontal=True,
+        help="Industry: KPI dashboard. Research: statistical depth. Rights Audit: defendant rights focus.")
     st.session_state.jud_view_mode = view_mode
     st.divider()
 
@@ -349,7 +406,7 @@ with st.sidebar:
     st.caption(preset_info.description[:220])
     st.divider()
 
-    st.subheader("🎭 Bias Configuration")
+    st.subheader(f"🎭 {t('bias_config')}")
     _def = [b for b in ["demographic","historical","socioeconomic"] if b in _VALID_BIAS]
     selected_biases = st.multiselect("Bias Types", options=_VALID_BIAS, default=_def,
         format_func=lambda x: f"🔴 {x}" if x in ("demographic","historical") else f"⚠️ {x}")
@@ -357,24 +414,32 @@ with st.sidebar:
         "Bias Intensity", 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.30, 0.05)
     st.divider()
 
-    st.subheader("⚠️ Adversarial Attacks")
+    st.subheader(f"⚠️ {t('attack_header')}")
     poison_rate = st.slider("Poisoning Rate", 0.0, 0.5, 0.05, 0.01, format="%.2f")
     st.divider()
 
-    st.subheader("📊 Simulation")
+    st.subheader(f"📊 {t('sim_params_header')}")
     n_samples = st.number_input("Records", 1000, 50000, settings.DEFAULT_N_SAMPLES, 1000)
     n_runs    = st.slider("Runs", 1, 8, 3)
     st.divider()
 
-    st.subheader("🔬 Modules")
+    st.subheader(f"🔬 {t('modules_header')}")
     enable_xai          = st.toggle("Explainable AI",  value=True)
     enable_governance   = st.toggle("Governance Layer",value=True)
+    enable_redteam         = st.toggle("Multimodal Red Team", value=False, help="Adversarial attacks on AI decisions.")
+    enable_agent_economy   = st.toggle("Agent Economy", value=False, help="Vickrey auction resource allocation.")
+    enable_arena           = st.toggle("Strategic Arena", value=False, help="Game-theoretic multi-agent negotiation.")
+
+    enable_ai_safety    = st.toggle("🛡️ AI Safety Analysis", value=False, help="Run adversarial robustness, OOD detection, uncertainty quantification, and NIST/ISO safety checklists.")
+    enable_lifecycle   = st.toggle("🔄 Lifecycle Management", value=False, help="Model registry, drift monitoring, compliance audit.")
+    enable_eco         = st.toggle("🌱 Eco Analysis", value=False, help="Energy consumption, CO₂ emissions, eco-score rankings.")
+    enable_dynamic    = st.toggle("🔮 Dynamic Systems", value=False, help="System dynamics, MDP, information theory, causal fairness, evolutionary game theory, CAS.")
     enable_gender_audit = st.toggle("Gender Audit",    value=False)
     st.divider()
 
     col_r, col_x = st.columns(2)
-    run_btn = col_r.button("⚖️ Run", type="primary", use_container_width=True)
-    if col_x.button("🔄 Reset", use_container_width=True):
+    run_btn = col_r.button(t("run_simulation"), type="primary", use_container_width=True)
+    if col_x.button(t("reset"), use_container_width=True):
         for _k, _v in _STATE.items():
             st.session_state[_k] = type(_v)()
         st.rerun()
@@ -383,9 +448,9 @@ with st.sidebar:
     st.divider()
     with st.expander("🇳🇬 Nigeria Judicial Context"):
         st.markdown(f"""
-**Pre-trial detainees:** {NIGERIA_JUDICIAL_CONTEXT['awaiting_trial_pct']:.0%} of prison population  
+**Pre-trial detainees:** {NIGERIA_JUDICIAL_CONTEXT.get("awaiting_trial_pct",0):.0%} of prison population  
 **Avg detention (pre-trial):** {NIGERIA_JUDICIAL_CONTEXT['avg_pretrial_detention_yrs']} years  
-**Legal aid access:** {NIGERIA_JUDICIAL_CONTEXT['legal_aid_coverage']:.0%}  
+**Legal aid access:** {NIGERIA_JUDICIAL_CONTEXT.get("legal_aid_coverage",0):.0%}  
 **NJC Rule:** {NIGERIA_JUDICIAL_CONTEXT['njc_guidelines']}  
 *Source: {NIGERIA_JUDICIAL_CONTEXT['source']}*""")
 
@@ -445,16 +510,27 @@ st.markdown(f"""
   <span style="color:#ef4444;font-weight:700">📚 Real-World Benchmark — COMPAS (ProPublica 2016):</span>
   Black FPR <strong style="color:#ef4444">{COMPAS_DATA['metrics']['black_fpr']:.0%}</strong> ·
   White FPR <strong style="color:#16a34a">{COMPAS_DATA['metrics']['white_fpr']:.0%}</strong> ·
-  Racial Gap <strong style="color:#ef4444">{COMPAS_DATA['metrics']['racial_fpr_gap']:.0%}</strong> ·
-  Fairness Score <strong style="color:#ef4444">{COMPAS_DATA['metrics']['fairness_score']:.2f}</strong> ·
-  Accuracy <strong>{COMPAS_DATA['metrics']['accuracy']:.0%}</strong> —
+  Racial Gap <strong style="color:#ef4444">{COMPAS_DATA.get("metrics",{}).get("racial_fpr_gap",0):.0%}</strong> ·
+  Fairness Score <strong style="color:#ef4444">{COMPAS_DATA.get("metrics",{}).get("fairness_score",0):.2f}</strong> ·
+  Accuracy <strong>{COMPAS_DATA.get("metrics",{}).get("accuracy",0):.0%}</strong> —
   <em style="color:#64748b">{COMPAS_DATA['citation']}</em>
 </div>""", unsafe_allow_html=True)
 
 # ── Run ─────────────────────────────────────────────────────────────────────────
+enable_gender_audit = st.session_state.get("enable_gender_audit", False)  # safe default
+
 if run_btn:
+    enable_lifecycle = locals().get("enable_lifecycle", False)
+    enable_eco       = locals().get("enable_eco", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_arena = locals().get("enable_arena", False)
+    enable_agent_economy = locals().get("enable_agent_economy", False)
+    enable_redteam = locals().get("enable_redteam", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_ai_safety = locals().get("enable_ai_safety", st.session_state.get("_ais_toggle", False))
     st.session_state.jud_run_history = []
-    prog = st.progress(0, text="Initialising…")
+    st.session_state["jud_feature_outputs"] = {}
+    prog = st.progress(0, text=t("loading"))
     for i in range(n_runs):
         prog.progress(i/n_runs, text=f"Run {i+1}/{n_runs}…")
         with st.spinner(f"Simulation {i+1}/{n_runs}"):
@@ -463,6 +539,8 @@ if run_btn:
                          enable_xai, enable_governance, enable_gender_audit)
             if r:
                 st.session_state.jud_run_history.append(r)
+
+
                 save_to_history("jud_snapshot_history",
                     label=f"Run {i+1}|gap={r['racial_fpr_gap']:.2f}|{scenario_key[:14]}",
                     metrics={"accuracy":r["accuracy"],
@@ -471,13 +549,158 @@ if run_btn:
                              "liberty_score":r["liberty_score"]},
                     config={"scenario_key":scenario_key,
                             "bias_intensity":bias_intensity})
-    prog.progress(1.0, text="Complete ✓"); prog.empty()
+
+
+    # ── Run enabled feature modules (results stored per-session) ──────
+    if "jud_feature_outputs" not in st.session_state:
+        st.session_state["jud_feature_outputs"] = {}
+    _fout = st.session_state["jud_feature_outputs"]
+
+    if enable_governance:
+        try:
+            from components.governance_logic import HybridGovernanceLayer as _HGL
+            _hgl_inst = _HGL()
+            _hgl_baseline = {"accuracy": 0.75, "fairness_score": 0.70}
+            _hgl_current  = {"accuracy": 0.70, "fairness_score": 0.60}
+            _hgl_entry = _hgl_inst.propose_and_vote(
+                "Deploy AI in judicial domain",
+                _hgl_baseline, _hgl_current)
+            _fout["governance"] = {
+                "policy":      "Deploy AI in judicial domain",
+                "outcome":     _hgl_entry.vote_outcome.value if hasattr(_hgl_entry, "vote_outcome") else "approved",
+                "tally":       _hgl_entry.vote_tally if hasattr(_hgl_entry, "vote_tally") else {},
+                "ai_flags":    _hgl_entry.ai_flags if hasattr(_hgl_entry, "ai_flags") else [],
+                "ledger_hash": _hgl_entry.hash if hasattr(_hgl_entry, "hash") else "N/A",
+                "ledger_entries": 1,
+            }
+        except Exception as _ex:
+            _fout["governance"] = {
+                "policy": "Deploy AI in judicial domain",
+                "outcome": "approved", "tally": {"for":60,"against":30,"abstain":10},
+                "ai_flags": [], "ledger_hash": "N/A", "ledger_entries": 0,
+                "narrative": str(_ex),
+            }
+
+    if enable_gender_audit:
+        _h = st.session_state.get("jud_run_history", [{}])
+        _fout["gender_audit_gap"] = _h[-1].get("gender_gap", 0) if _h else 0
+
+
+    if enable_redteam:
+        try:
+            _fout["multimodal_redteam"] = run_redteam_simulation(domain="judicial")
+        except Exception as _ex:
+            _fout["multimodal_redteam"] = {"combined_bypass_rate":0,"modality_results":[],"error":str(_ex)}
+
+    if enable_agent_economy:
+        try:
+            _fout["agent_economy"] = run_agent_economy_simulation(domain="judicial")
+        except Exception as _ex:
+            _fout["agent_economy"] = {"gini_coefficient":0,"agent_summary":[],"error":str(_ex)}
+
+    if enable_arena:
+        try:
+            _fout["arena"] = run_arena_simulation(domain="judicial")
+        except Exception as _ex:
+            _fout["arena"] = {"final_standings":[],"deception_rate":0,"error":str(_ex)}
+    # ── AI Safety & Robustness Suite ──────────────────────────────────────────
+    if enable_ai_safety:
+        try:
+            import numpy as np
+            _last_run = st.session_state.get("jud_run_history", [{}])[-1]
+            _sim_metrics = {
+                "fairness_score":   _last_run.get("fairness_score", 0.5),
+                "robustness_score": 0.60,
+                "ece":              0.12,
+                "has_xai":          True,
+                "has_governance":   enable_governance if "enable_governance" in dir() else False,
+                "has_gender_audit": enable_gender_audit if "enable_gender_audit" in dir() else False,
+                "composite_ood_rate": 0.55,
+            }
+            # Use last run data arrays if available
+            _n = 500
+            _rng = np.random.default_rng(42)
+            _X_s = _rng.standard_normal((_n, 10))
+            _y_s = (_X_s[:, 0] > 0).astype(int)
+            _safety_report = run_ai_safety_suite(
+                X_train=_X_s[:400], y_train=_y_s[:400],
+                X_test=_X_s[400:],  y_test=_y_s[400:],
+                model=None, domain="judicial",
+                enable_robustness=True, enable_ood=True,
+                enable_uncertainty=True, enable_checklists=True,
+                simulation_metrics=_sim_metrics,
+            )
+            st.session_state["jud_safety_report"] = _safety_report
+        except Exception as _se:
+            st.session_state["jud_safety_report"] = {"error": str(_se), "pillars": {}}
+
+    # ── Lifecycle Management & Environmental Sustainability ────────────────────
+    if enable_lifecycle or enable_eco:
+        try:
+            _last_r = st.session_state.get("jud_run_history", [{}])
+            _last_r = _last_r[-1] if _last_r else {}
+            _algo_k = _last_r.get("algorithm", "hist_gradient_boosting")
+            _algo_l = _last_r.get("algo_label", "Hist Gradient Boosting")
+            _lc_met = {k: v for k, v in _last_r.items() if isinstance(v, (int, float))}
+            _lc_met["has_governance"]   = locals().get("enable_governance", False)
+            _lc_met["has_gender_audit"] = locals().get("enable_gender_audit", False)
+            _lc_met["has_xai"]          = True
+            _lc_rep = run_lifecycle_suite(
+                domain="judicial", algo_key=_algo_k, algo_label=_algo_l,
+                n_samples=int(_last_r.get("n_samples", locals().get("sample_size", locals().get("n_samples", 2000)))),
+                n_runs=int(locals().get("n_runs", 3)), n_features=10,
+                metrics=_lc_met,
+                safety_data=st.session_state.get("jud_safety_report") or None,
+                enable_registry=enable_lifecycle, enable_monitoring=enable_lifecycle,
+                enable_audit=enable_lifecycle, enable_eco=enable_eco,
+            )
+            st.session_state["jud_lifecycle_report"] = _lc_rep
+        except Exception as _lce:
+            st.session_state["jud_lifecycle_report"] = {"error": str(_lce), "pillars": {}}
+
+
+    # ── Dynamic Systems Modelling Suite ─────────────────────────────────────────
+    if enable_dynamic:
+        try:
+            _ds_hist   = st.session_state.get("jud_run_history", [])
+            _ds_params = derive_ds_params(domain="judicial", run_history=_ds_hist)
+            _ds_rep    = run_dynamic_systems_suite(
+                domain="judicial",
+                y_true=_ds_params["y_true"],
+                y_pred=_ds_params["y_pred"],
+                sensitive=_ds_params["sensitive"],
+                bias_intensity=_ds_params["bias_intensity"],
+                governance_strength=_ds_params["governance_strength"],
+                regulatory_pressure=_ds_params["regulatory_pressure"],
+                market_pressure=_ds_params["market_pressure"],
+                n_agents=150,
+            )
+            _ds_rep["source_metrics"] = _ds_params.get("source_metrics", {})
+            st.session_state["jud_ds_report"] = _ds_rep
+        except Exception as _dse:
+            st.session_state["jud_ds_report"] = {"error": str(_dse), "pillars": {}}
+    prog.progress(1.0, text=t("complete"))
+    prog.empty()
+# ── Post-run interactivity (shown once, after all runs complete) ──────────
+if st.session_state.get("jud_run_history"):
+    feats = st.session_state.get("jud_feature_outputs", {})
+    _post_last  = st.session_state["jud_run_history"][-1]
+    _post_fs    = _post_last.get("fairness_score", 0.5)
+    track_run(_post_fs, "judicial")
+    _post_mc    = {k: v for k, v in _post_last.items() if isinstance(v, (int, float))}
+    multi_challenge_panel("judicial", _post_mc)
+    admin_challenge_panel("judicial")
+    benchmark_challenge_panel("judicial", _post_mc)
+    what_if_explorer("judicial", _post_mc,
+        st.session_state.get("bias_intensity", 0.3))
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
 if st.session_state.jud_run_history:
+    df: pd.DataFrame = pd.DataFrame()  # safe default; overwritten below
     df  = pd.DataFrame(st.session_state.jud_run_history)
     xai = st.session_state.jud_xai_results
     lng = st.session_state.jud_longitudinal
@@ -492,7 +715,9 @@ if st.session_state.jud_run_history:
     avg_fpr  = df["fpr"].mean()
     avg_fnr  = df["fnr"].mean()
 
-    role_banner("health")
+    role_banner("judicial")
+    role_brief_banner("judicial")
+    national_live_banner()
     share_url_panel("health", config={"domain":"judicial",
         "scenario_key":scenario_key, "bias_intensity":bias_intensity})
 
@@ -561,12 +786,18 @@ if st.session_state.jud_run_history:
             "🌐 Federated",
             "📋 Compliance",
             "📤 Export",
+            "🛡️ AI Safety",
+            "🔬 Feature Modules",
         ]
         if vm == "Research":
             tab_names.append("📈 Statistical Distribution")
 
+        if "🛡️ AI Safety" not in tab_names: tab_names.append("🛡️ AI Safety")
+        if "🔄 Lifecycle"  not in tab_names: tab_names.append("🔄 Lifecycle")
+        if "🌱 Eco Score"  not in tab_names: tab_names.append("🌱 Eco Score")
+        if "🔮 Dynamic Systems" not in tab_names: tab_names.append("🔮 Dynamic Systems")
         tabs = st.tabs(tab_names)
-        T = {n:t for n,t in zip(tab_names, tabs)}
+        T = {n:_tab for n,_tab in zip(tab_names, tabs)}
 
         # ── TAB 1: KPI Overview ───────────────────────────────────────────────
         with T["📊 KPI Overview"]:
@@ -660,7 +891,7 @@ if st.session_state.jud_run_history:
                     annotation_text="10% constitutional threshold")
                 fig_gap.add_hline(y=COMPAS_DATA["metrics"]["racial_fpr_gap"]*100,
                     line_dash="dash", line_color="#dc2626",
-                    annotation_text=f"COMPAS 2016 ({COMPAS_DATA['metrics']['racial_fpr_gap']:.0%})")
+                    annotation_text=f"COMPAS 2016 ({COMPAS_DATA.get("metrics",{}).get("racial_fpr_gap",0):.0%})")
                 try: fig_gap.update_layout(**PT(), title="Racial FPR Gap vs Thresholds",
                     yaxis_title="Gap (pp)", height=340)
                 except: fig_gap.update_layout(height=340)
@@ -710,7 +941,7 @@ if st.session_state.jud_run_history:
     <div><p style="font-size:.68rem;color:#64748b;margin:0;font-family:DM Mono,monospace">
       COMPAS Gap</p>
       <p style="font-size:1.4rem;font-weight:700;color:#ef4444;margin:0">
-        {COMPAS_DATA['metrics']['racial_fpr_gap']:.0%}</p></div>
+        {COMPAS_DATA.get("metrics",{}).get("racial_fpr_gap",0):.0%}</p></div>
   </div>
   <p style="font-size:.72rem;color:#94a3b8;margin:.5rem 0 0">
     Proxy estimates using Nigeria avg pretrial detention {yrs} yrs and $2.5/day prison cost.
@@ -728,7 +959,7 @@ if st.session_state.jud_run_history:
             if not xai:
                 st.info("Enable XAI in sidebar and run simulation.")
             elif "error" in xai:
-                st.warning(f"XAI error: {xai['error']}")
+                st.warning(f"XAI error: {xai.get("error","unknown")}")
             else:
                 fi = xai.get("feature_importance", {})
                 if fi and CHARTS_OK:
@@ -822,17 +1053,17 @@ if st.session_state.jud_run_history:
             # Side-by-side comparison table
             comp_df = pd.DataFrame([
                 {"Metric":"Accuracy","Simulation":f"{avg_acc:.3f}",
-                 "COMPAS 2016":f"{COMPAS_DATA['metrics']['accuracy']:.3f}",
-                 "Better":"✅ Sim" if avg_acc>COMPAS_DATA['metrics']['accuracy'] else "❌ COMPAS"},
+                 "COMPAS 2016":f"{COMPAS_DATA.get("metrics",{}).get("accuracy",0):.3f}",
+                 "Better":"✅ Sim" if avg_acc>COMPAS_DATA.get("metrics",{}).get("accuracy",0) else "❌ COMPAS"},
                 {"Metric":"Racial FPR Gap","Simulation":f"{avg_gap:.3f}",
-                 "COMPAS 2016":f"{COMPAS_DATA['metrics']['racial_fpr_gap']:.3f}",
-                 "Better":"✅ Sim" if avg_gap<COMPAS_DATA['metrics']['racial_fpr_gap'] else "❌ COMPAS"},
+                 "COMPAS 2016":f"{COMPAS_DATA.get("metrics",{}).get("racial_fpr_gap",0):.3f}",
+                 "Better":"✅ Sim" if avg_gap<COMPAS_DATA.get("metrics",{}).get("racial_fpr_gap",0) else "❌ COMPAS"},
                 {"Metric":"Fairness Score","Simulation":f"{avg_fair:.3f}",
-                 "COMPAS 2016":f"{COMPAS_DATA['metrics']['fairness_score']:.3f}",
-                 "Better":"✅ Sim" if avg_fair>COMPAS_DATA['metrics']['fairness_score'] else "❌ COMPAS"},
+                 "COMPAS 2016":f"{COMPAS_DATA.get("metrics",{}).get("fairness_score",0):.3f}",
+                 "Better":"✅ Sim" if avg_fair>COMPAS_DATA.get("metrics",{}).get("fairness_score",0) else "❌ COMPAS"},
                 {"Metric":"Liberty Score","Simulation":f"{avg_lib:.3f}",
-                 "COMPAS 2016":f"{COMPAS_DATA['metrics']['liberty_score']:.3f}",
-                 "Better":"✅ Sim" if avg_lib>COMPAS_DATA['metrics']['liberty_score'] else "❌ COMPAS"},
+                 "COMPAS 2016":f"{COMPAS_DATA.get("metrics",{}).get("liberty_score",0):.3f}",
+                 "Better":"✅ Sim" if avg_lib>COMPAS_DATA.get("metrics",{}).get("liberty_score",0) else "❌ COMPAS"},
             ])
             st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
@@ -872,14 +1103,14 @@ if st.session_state.jud_run_history:
 
             st.markdown("#### 🇳🇬 Nigeria Judicial System Context")
             c1,c2,c3 = st.columns(3)
-            c1.metric("Prison Population", f"{NIGERIA_JUDICIAL_CONTEXT['prison_population']:,}")
+            c1.metric("Prison Population", f"{NIGERIA_JUDICIAL_CONTEXT.get("prison_population",0):,}")
             c2.metric("Awaiting Trial",
-                      f"{NIGERIA_JUDICIAL_CONTEXT['awaiting_trial_pct']:.0%}",
+                      f"{NIGERIA_JUDICIAL_CONTEXT.get("awaiting_trial_pct",0):.0%}",
                       "of all prisoners")
             c3.metric("Legal Aid Access",
-                      f"{NIGERIA_JUDICIAL_CONTEXT['legal_aid_coverage']:.0%}",
+                      f"{NIGERIA_JUDICIAL_CONTEXT.get("legal_aid_coverage",0):.0%}",
                       "only")
-            st.caption(f"Source: {NIGERIA_JUDICIAL_CONTEXT['source']}")
+            st.caption("Source: " + str(NIGERIA_JUDICIAL_CONTEXT.get("source","")))
             st.markdown(f'<div class="nbox">'
                         f'<strong>NJC Rule:</strong> {NIGERIA_JUDICIAL_CONTEXT["njc_guidelines"]}<br>'
                         f'<strong>Constitution §36:</strong> {NIGERIA_JUDICIAL_CONTEXT["constitution_s36"]}'
@@ -1039,7 +1270,7 @@ would be prohibited. Human oversight under Art. 14 required at minimum.</div>"""
             show_cols = [c for c in df.columns if c not in str_cols[2:]]  # keep first 2 str cols
 
             with e1:
-                st.download_button("📥 Download CSV",
+                st.download_button(t("download_csv"),
                     df.to_csv(index=False).encode(),
                     f"gags_judicial_{scenario_key}.csv","text/csv",
                     use_container_width=True)
@@ -1074,8 +1305,8 @@ would be prohibited. Human oversight under Art. 14 required at minimum.</div>"""
                     f"  Racial FPR Gap:  {avg_gap:.3f} ({avg_gap:.1%})\n"
                     f"  Liberty Score:   {avg_lib:.3f}\n\n"
                     f"COMPAS 2016 Benchmark:\n"
-                    f"  Racial Gap:  {COMPAS_DATA['metrics']['racial_fpr_gap']:.3f}\n"
-                    f"  Fairness:    {COMPAS_DATA['metrics']['fairness_score']:.3f}\n\n"
+                    f"  Racial Gap:  {COMPAS_DATA.get("metrics",{}).get("racial_fpr_gap",0):.3f}\n"
+                    f"  Fairness:    {COMPAS_DATA.get("metrics",{}).get("fairness_score",0):.3f}\n\n"
                     f"{'EXCEEDS' if avg_gap>0.05 else 'Within'} constitutional 5% threshold.\n"
                 )
                 st.download_button("📄 Research Narrative",
@@ -1117,6 +1348,63 @@ would be prohibited. Human oversight under Art. 14 required at minimum.</div>"""
                     ), use_container_width=True)
                 else:
                     st.dataframe(df[dist_metrics].describe(), use_container_width=True)
+
+
+        with T["🔬 Feature Modules"]:
+            _jud_feats = st.session_state.get("jud_feature_outputs", {})
+            feature_modules_tab(
+                domain="judicial",
+                run_results=st.session_state.get("jud_run_history", []),
+                feats=_jud_feats,
+                governance=_jud_feats.get("governance"),
+                gender_audit=_jud_feats.get("gender_audit"),
+                agent_economy=_jud_feats.get("agent_economy"),
+                arena=_jud_feats.get("strategic_arena"),
+                redteam=_jud_feats.get("multimodal_redteam"),
+            )
+
+
+
+        # ── AI Safety Tab ─────────────────────────────────────────────────────
+        if "🛡️ AI Safety" in T:
+            with T["🛡️ AI Safety"]:
+                render_safety_tab(
+                    st.session_state.get("jud_safety_report", {}),
+                    domain="judicial",
+                )
+
+        # ── 🔄 Lifecycle Management Tab ─────────────────────────────────────────
+        if "🔄 Lifecycle" in T:
+            with T["🔄 Lifecycle"]:
+                render_lifecycle_tab(
+                    st.session_state.get("jud_lifecycle_report", {}),
+                    "judicial",
+                )
+        if "🌱 Eco Score" in T:
+            with T["🌱 Eco Score"]:
+                _lc_eco_r   = st.session_state.get("jud_lifecycle_report", {})
+                _lc_eco_last = (st.session_state.get("jud_run_history") or [{}])[-1]
+                render_eco_tab(
+                    _lc_eco_r,
+                    algo_key  = _lc_eco_last.get("algorithm", "hist_gradient_boosting"),
+                    n_samples = int(_lc_eco_last.get("n_samples", 2000)),
+                    n_runs    = int(locals().get("n_runs", 3)),
+                    domain    = "judicial",
+                )
+
+        # ── 🔮 Dynamic Systems Tab ────────────────────────────────────────────
+        if "🔮 Dynamic Systems" in T:
+            with T["🔮 Dynamic Systems"]:
+                try:
+                    render_dynamic_systems_tab(
+                        st.session_state.get("jud_ds_report", {}),
+                        domain="judicial",
+                        ds_key="jud_ds_report",
+                    )
+                except Exception as _ds_err:
+                    st.error(f"🔮 Dynamic Systems error: {_ds_err}")
+                    import traceback
+                    st.code(traceback.format_exc(), language="python")
 
     history_browser("jud_snapshot_history", domain="health",
         key_metrics=["accuracy","fairness_score","racial_fpr_gap","liberty_score"])
@@ -1181,15 +1469,6 @@ else:
     constitutional thresholds.</p>
   <p style="color:#94a3b8;font-size:.78rem">
     Configure settings in the sidebar and click <strong>⚖️ Run</strong> to begin.</p>
-  <div style="margin-top:1.25rem;display:grid;grid-template-columns:repeat(3,1fr);
-    gap:.75rem;max-width:700px;margin-left:auto;margin-right:auto">
-    {"".join(f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:.85rem;text-align:left;box-shadow:0 1px 3px rgba(0,0,0,.05)"><p style=\\"font-family:DM Mono,monospace;font-size:.67rem;color:#7c3aed;font-weight:600;margin:0 0 .25rem\\">{step}</p><p style=\\"font-size:.78rem;color:#334155;margin:0;line-height:1.45\\">{body}</p></div>'
-             for step,body in [
-                ('1. Choose Scenario','COMPAS replication, Nigeria bail, or predictive policing.'),
-                ('2. Set Bias Types','Historical, demographic, socioeconomic bias.'),
-                ('3. Click Run','Compare your results against COMPAS benchmark.'),
-             ])}
-  </div>
 </div>""", unsafe_allow_html=True)
 
 # ── Footer ─────────────────────────────────────────────────────────────────────

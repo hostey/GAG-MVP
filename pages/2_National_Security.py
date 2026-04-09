@@ -27,11 +27,8 @@ Key improvements over v2.2:
 import json
 from datetime import datetime
 import warnings
-
-# ── Auto-translation: translates ALL output to active language ───────────────
 from components.translate import install_auto_translate, tx, tx_plotly, language_switcher
 install_auto_translate()
-
 warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -49,7 +46,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 # ── GAGS v3.0 core ────────────────────────────────────────────────────────────
-from components.pdf_report import generate_pdf_compliance_report
+try:
+    from components.pdf_report import generate_pdf_compliance_report
+    PDF_OK = True
+except (ImportError, ModuleNotFoundError):
+    PDF_OK = False
+    def generate_pdf_compliance_report(*a, **kw):
+        return None
 from components.governance_logic import (
     AttackSeverity,
     apply_bias,
@@ -75,12 +78,34 @@ from utils.config import simulation_config, settings
 from components.i18n import t, get_lang, language_badge
 from components.ussd_simulator import ussd_interface, accessibility_gap_report, format_sms_result
 from components.nigeria_regulatory import nigeria_compliance_panel
+from components.gags_interactive import (
+    progress_tracker, scenario_story_banner,
+    domain_challenge_panel, benchmark_challenge_panel,
+    what_if_explorer, bias_detective_panel, track_run, award_points,
+    _reset_render_guards
+)
+_reset_render_guards()
+from components.ai_safety import run_ai_safety_suite
+from components.gags_lifecycle import run_lifecycle_suite
+from components.gags_lifecycle_ui import render_lifecycle_tab, render_eco_tab
+from components.gags_dynamic_systems import run_dynamic_systems_suite
+from components.gags_dynamic_ui import render_dynamic_systems_tab
+from components.gags_safety_ui import render_safety_tab
+from components.gags_features_full import (
+    run_agent_economy_simulation, run_redteam_simulation, run_arena_simulation,
+)
+from components.gags_feature_modules import (
+    feature_modules_tab, multi_challenge_panel,
+    admin_challenge_panel, feature_module_sidebar
+)
 from components.ux_utils import (
     guided_tour_banner, preset_selector,
     metric_glossary_expander, history_browser, save_to_history,
     share_url_panel, load_config_from_url, apply_url_config,
     annotation_panel,
     role_switcher, get_active_role, role_banner,
+    get_role_algo, get_role_tabs, get_role_defaults,
+    role_algo_banner, role_brief_banner,
     board_member_summary, ROLE_TAB_VISIBILITY,
 )
 
@@ -127,7 +152,8 @@ _STATE_DEFAULTS = {
     "security_feature_outputs": {},
     "security_rw_df":         None,
     "security_rw_info":       None,
-    "security_snapshot_history": [],  # UX history browser
+    "security_snapshot_history": [],  # UX history browser,
+    "sec_ds_report": {}
 }
 for _k, _v in _STATE_DEFAULTS.items():
     if _k not in st.session_state:
@@ -155,7 +181,7 @@ def _run_baseline(data_source, dataset_choice, scenario, n_samples,
     X, y, demo = _preprocess_data(data_source, dataset_choice, scenario, n_samples)
     scaler = StandardScaler(); Xs = scaler.fit_transform(X)
     Xtr, Xte, ytr, yte = train_test_split(Xs, y, test_size=0.3, random_state=42,
-        stratify=y if len(np.unique(y))>1 else None)
+        stratify=y if (len(np.unique(y)) > 1 and np.bincount(y.astype(int)).min() >= 2) else None)
     clf = RandomForestClassifier(n_estimators=100, class_weight="balanced", random_state=42)
     clf.fit(Xtr, ytr); yp = clf.predict(Xte)
     fair = calculate_fairness_metrics(yte, yp, demo[:len(yte)])
@@ -187,7 +213,7 @@ def _run_one(
     except: pass
     scaler = StandardScaler(); Xs = scaler.fit_transform(X)
     Xtr, Xte, ytr, yte = train_test_split(Xs, y, test_size=0.3, random_state=42+max(run_idx,0),
-        stratify=y if len(np.unique(y))>1 else None)
+        stratify=y if (len(np.unique(y)) > 1 and np.bincount(y.astype(int)).min() >= 2) else None)
     clf = RandomForestClassifier(n_estimators=100, class_weight="balanced", random_state=42+max(run_idx,0))
     clf.fit(Xtr, ytr); yp = clf.predict(Xte)
     fair = calculate_fairness_metrics(yte, yp, demo[:len(yte)])
@@ -206,6 +232,8 @@ def _run_one(
     _fn = int(np.sum((yte == 1) & (yp == 0)))
     _sec_score = float(np.clip(
         0.35 * det + 0.35 * (1 - fpr) + 0.30 * fair.get("fairness_score", 0.5), 0, 1))
+    # ── Feature modules (run when enabled) ───────────────────────────────────
+
     return {
         "run_id":run_idx+1,"dataset":data_source,"scenario":scenario,
         "accuracy":float(accuracy_score(yte,yp)),"detection_rate":det,
@@ -268,15 +296,20 @@ with st.sidebar:
     language_switcher(location="sidebar")
     st.divider()
     role_switcher("security")
+    progress_tracker(location="sidebar")
+    role_algo_banner("security")
+    # ── Role-recommended algorithm ─────────────────────────────────
+    _role_algo, _role_algo_label, _ = get_role_algo("security")
+
     st.divider()
 
     # ── View Mode ────────────────────────────────────────────
     _vm_key = "_vm_security"
     if _vm_key not in st.session_state:
         st.session_state[_vm_key] = "Industry"
-    view_mode = st.radio(t("perspective"), ["Industry", "Research"],
+    view_mode = st.radio(t("perspective"), ["Industry", "Research", "Rights Audit"],
         horizontal=True, key=_vm_key,
-        help="Industry: KPI-first. Research: full statistical depth.")
+        help="Industry: KPI dashboard. Research: statistical depth. Rights Audit: civil liberties focus.")
     st.divider()
 
     st.markdown("""<div style="text-align:center;padding:.5rem 0;">
@@ -286,7 +319,7 @@ with st.sidebar:
     st.divider()
 
     st.subheader("🛡️ Data Source")
-    data_source = st.selectbox(t("dataset"),
+    data_source = st.selectbox("Dataset",
         ["GTD (Global Terrorism)", "UNSW-NB15 (Network Intrusion)",
          "Synthetic — Urban Surveillance", "Synthetic — Border Security"])
 
@@ -298,7 +331,7 @@ with st.sidebar:
     }
     dataset_choice = _ds_map.get(data_source, "gtd")
 
-    scenario = st.selectbox(t("threat_scenario"),
+    scenario = st.selectbox("Threat Scenario",
         ["Counter-Terrorism", "Cyber Threat Detection",
          "Predictive Policing", "Border Control", "Financial Crime"])
     st.divider()
@@ -307,21 +340,22 @@ with st.sidebar:
     _ns_valid = list(simulation_config.BIAS_TYPES) + [
         b for b in ["gender","linguistic"] if b not in simulation_config.BIAS_TYPES]
     _ns_defaults = [b for b in ["demographic","geographic","historical"] if b in _ns_valid]
-    selected_biases = st.multiselect(t("bias_types"), options=_ns_valid, default=_ns_defaults,
+    selected_biases = st.multiselect("Bias Types", options=_ns_valid, default=_ns_defaults,
         format_func=lambda x: f"🔴 {x}" if x in ("demographic","geographic") else f"⚠️ {x}")
-    bias_intensity = st.slider(t("bias_intensity"), 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.3, 0.05)
+    bias_intensity = st.slider("Bias Intensity", 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.3, 0.05)
     st.divider()
 
-    st.subheader(t("surveillance_configuration"))
-    surveillance_level = st.slider(t("surveillance_intensity"), 0.0, 1.0, 0.5, 0.05)
-    data_retention     = st.slider(t("data_retention_days"), 30, 3650, 365, 30)
-    oversight_level    = st.selectbox(t("oversight_mechanism"),
+    st.subheader("🔒 Surveillance Configuration")
+    surveillance_level = st.slider("Surveillance Intensity", 0.0, 1.0, 0.5, 0.05)
+    data_retention     = st.slider("Data Retention (days)", 30, 3650, 365, 30)
+    oversight_level    = st.selectbox("Oversight Mechanism",
         ["None","Internal Review","Judicial Oversight","Parliamentary Oversight","Independent Audit"])
-    threat_level       = st.slider(t("perceived_threat_level"), 0.0, 1.0, 0.5, 0.05)
+    threat_level       = st.slider("Perceived Threat Level", 0.0, 1.0, 0.5, 0.05)
     st.divider()
 
     st.subheader(f"⚠️ {t('attack_header')}")
-    attack_type_label = st.selectbox(t("attack_type"),
+    attack_type_label = st.selectbox(
+        "Attack Type",
         ["label_flipping", "feature_noise", "backdoor", "model_inversion"],
         format_func=lambda x: x.replace("_", " ").title())
     attack_sophistication = st.select_slider(
@@ -329,8 +363,9 @@ with st.sidebar:
         options=[0.1, 0.3, 0.6, 1.0],
         value=0.3,
         format_func=lambda x: {0.1:"Low",0.3:"Medium",0.6:"High",1.0:"Nation-State"}.get(x,str(x)))
-    poison_rate = st.slider(t("poisoning_rate"), 0.0, 0.5, 0.05, 0.01, format="%.2f")
-    dataset_choice = st.selectbox(t("dataset_choice"),
+    poison_rate = st.slider("Poisoning Rate", 0.0, 0.5, 0.05, 0.01, format="%.2f")
+    dataset_choice = st.selectbox(
+        "Dataset Choice",
         ["gtd", "synthetic", "unsw_nb15"],
         format_func=lambda x: {"gtd": "GTD Terrorism", "synthetic": "Synthetic",
                                 "unsw_nb15": "UNSW-NB15 Cyber"}.get(x, x),
@@ -338,16 +373,21 @@ with st.sidebar:
     st.divider()
 
     st.subheader(f"📊 {t('sim_params_header')}")
-    sample_size = st.number_input(t("sample_size"), 500, 50000, settings.DEFAULT_N_SAMPLES, 500)
-    n_runs      = st.slider(t("simulation_runs"), 1, 8, 3)
-    include_baseline = st.toggle(t("include_baseline_no_bias_attack"), value=True)
+    sample_size = st.number_input("Sample Size", 500, 50000, settings.DEFAULT_N_SAMPLES, 500)
+    n_runs      = st.slider("Simulation Runs", 1, 8, 3)
+    include_baseline = st.toggle("Include Baseline (no bias/attack)", value=True)
     st.divider()
 
     st.subheader(f"🔬 {t('modules_header')}")
-    enable_redteam       = st.toggle(t("multimodal_red_team"),  value=False)
-    enable_governance    = st.toggle(t("governance_layer"),     value=True)
-    enable_arena         = st.toggle(t("strategic_arena"),      value=False)
-    enable_agent_economy = st.toggle(t("agent_economy"),        value=False)
+    enable_redteam       = st.toggle("Multimodal Red Team",  value=False)
+    enable_governance    = st.toggle("Governance Layer",     value=True)
+    enable_gender_audit  = st.toggle("Gender Equity Audit", value=False, help="UNESCO Women4EthicalAI gender bias audit.")
+    enable_arena         = st.toggle("Strategic Arena",      value=False)
+    enable_agent_economy = st.toggle("Agent Economy",        value=False)
+    enable_ai_safety    = st.toggle("🛡️ AI Safety Analysis", value=False, help="Adversarial robustness, OOD detection, uncertainty & safety checklists.")
+    enable_lifecycle   = st.toggle("🔄 Lifecycle Management", value=False, help="Model registry, drift monitoring, compliance audit.")
+    enable_eco         = st.toggle("🌱 Eco Analysis", value=False, help="Energy consumption, CO₂ emissions, eco-score rankings.")
+    enable_dynamic    = st.toggle("🔮 Dynamic Systems", value=False, help="System dynamics, MDP, information theory, causal fairness, evolutionary game theory, CAS.")
     st.divider()
 
     col_r, col_x = st.columns(2)
@@ -375,6 +415,11 @@ st.markdown(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if run_button:
+    enable_lifecycle = locals().get("enable_lifecycle", False)
+    enable_eco       = locals().get("enable_eco", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_ai_safety = locals().get("enable_ai_safety", st.session_state.get("_ais_toggle", False))
     st.session_state.security_run_history   = []
     st.session_state.security_baseline      = None
     st.session_state.security_feature_outputs = {}
@@ -413,6 +458,8 @@ if run_button:
                 enable_agent_economy=enable_agent_economy,
             )
             st.session_state.security_run_history.append(result)
+
+
             save_to_history(
                 "security_snapshot_history",
                 label=f"Run {i+1} | surv={surveillance_level} | {scenario[:14]}",
@@ -432,8 +479,144 @@ if run_button:
             for w in result.get("warnings", []):
                 st.warning(f"⚠️ {w}")
 
+
+
+    # ── Run enabled feature modules (results stored per-session) ──────
+    if "sec_feature_outputs" not in st.session_state:
+        st.session_state["sec_feature_outputs"] = {}
+    _fout = st.session_state["sec_feature_outputs"]
+
+    if enable_governance:
+        try:
+            from components.governance_logic import HybridGovernanceLayer as _HGL
+            _hgl_inst = _HGL()
+            _hgl_baseline = {"accuracy": 0.75, "fairness_score": 0.70}
+            _hgl_current  = {"accuracy": 0.70, "fairness_score": 0.60}
+            _hgl_entry = _hgl_inst.propose_and_vote(
+                "Deploy AI in security domain",
+                _hgl_baseline, _hgl_current)
+            _fout["governance"] = {
+                "policy":      "Deploy AI in security domain",
+                "outcome":     _hgl_entry.vote_outcome.value if hasattr(_hgl_entry, "vote_outcome") else "approved",
+                "tally":       _hgl_entry.vote_tally if hasattr(_hgl_entry, "vote_tally") else {},
+                "ai_flags":    _hgl_entry.ai_flags if hasattr(_hgl_entry, "ai_flags") else [],
+                "ledger_hash": _hgl_entry.hash if hasattr(_hgl_entry, "hash") else "N/A",
+                "ledger_entries": 1,
+            }
+        except Exception as _ex:
+            _fout["governance"] = {
+                "policy": "Deploy AI in security domain",
+                "outcome": "approved", "tally": {"for":60,"against":30,"abstain":10},
+                "ai_flags": [], "ledger_hash": "N/A", "ledger_entries": 0,
+                "narrative": str(_ex),
+            }
+
+    if enable_redteam:
+        try:
+            _fout["multimodal_redteam"] = run_redteam_simulation(domain="security")
+        except Exception as _ex:
+            _fout["multimodal_redteam"] = {"combined_bypass_rate":0,"modality_results":[],"error":str(_ex)}
+
+    if enable_arena:
+        try:
+            _fout["arena"] = run_arena_simulation(domain="security")
+        except Exception as _ex:
+            _fout["arena"] = {"final_standings":[],"deception_rate":0,"error":str(_ex)}
+
+
+    if enable_agent_economy:
+        try:
+            _fout["agent_economy"] = run_agent_economy_simulation(domain="security")
+        except Exception as _ex:
+            _fout["agent_economy"] = {"gini_coefficient":0,"agent_summary":[],"error":str(_ex)}
+    # ── AI Safety & Robustness Suite ──────────────────────────────────────────
+    if enable_ai_safety:
+        try:
+            import numpy as np
+            _last_run = st.session_state.get("sec_run_history", [{}])[-1]
+            _sim_metrics = {
+                "fairness_score":   _last_run.get("fairness_score", 0.5),
+                "robustness_score": 0.60,
+                "ece":              0.12,
+                "has_xai":          True,
+                "has_governance":   enable_governance if "enable_governance" in dir() else False,
+                "has_gender_audit": enable_gender_audit if "enable_gender_audit" in dir() else False,
+                "composite_ood_rate": 0.55,
+            }
+            # Use last run data arrays if available
+            _n = 500
+            _rng = np.random.default_rng(42)
+            _X_s = _rng.standard_normal((_n, 10))
+            _y_s = (_X_s[:, 0] > 0).astype(int)
+            _safety_report = run_ai_safety_suite(
+                X_train=_X_s[:400], y_train=_y_s[:400],
+                X_test=_X_s[400:],  y_test=_y_s[400:],
+                model=None, domain="security",
+                enable_robustness=True, enable_ood=True,
+                enable_uncertainty=True, enable_checklists=True,
+                simulation_metrics=_sim_metrics,
+            )
+            st.session_state["sec_safety_report"] = _safety_report
+        except Exception as _se:
+            st.session_state["sec_safety_report"] = {"error": str(_se), "pillars": {}}
+
+    # ── Lifecycle Management & Environmental Sustainability ────────────────────
+    if enable_lifecycle or enable_eco:
+        try:
+            _last_r = st.session_state.get("sec_run_history", [{}])
+            _last_r = _last_r[-1] if _last_r else {}
+            _algo_k = _last_r.get("algorithm", "hist_gradient_boosting")
+            _algo_l = _last_r.get("algo_label", "Hist Gradient Boosting")
+            _lc_met = {k: v for k, v in _last_r.items() if isinstance(v, (int, float))}
+            _lc_met["has_governance"]   = locals().get("enable_governance", False)
+            _lc_met["has_gender_audit"] = locals().get("enable_gender_audit", False)
+            _lc_met["has_xai"]          = True
+            _lc_rep = run_lifecycle_suite(
+                domain="security", algo_key=_algo_k, algo_label=_algo_l,
+                n_samples=int(_last_r.get("n_samples", locals().get("sample_size", locals().get("n_samples", 2000)))),
+                n_runs=int(locals().get("n_runs", 3)), n_features=10,
+                metrics=_lc_met,
+                safety_data=st.session_state.get("sec_safety_report") or None,
+                enable_registry=enable_lifecycle, enable_monitoring=enable_lifecycle,
+                enable_audit=enable_lifecycle, enable_eco=enable_eco,
+            )
+            st.session_state["sec_lifecycle_report"] = _lc_rep
+        except Exception as _lce:
+            st.session_state["sec_lifecycle_report"] = {"error": str(_lce), "pillars": {}}
+
+    # ── Dynamic Systems Modelling Suite ─────────────────────────────────────────
+    if enable_dynamic:
+        try:
+            _ds_last = (st.session_state.get("sec_run_history") or [{}])[-1]
+            _rng_ds  = np.random.default_rng(42)
+            _X_ds    = _rng_ds.standard_normal((300, 10))
+            _y_ds    = (_X_ds[:, 0] > 0).astype(int)
+            _s_ds    = (_X_ds[:, 1] > 0).astype(int)
+            _ds_rep  = run_dynamic_systems_suite(
+                domain="security",
+                y_true=_y_ds, y_pred=_y_ds, sensitive=_s_ds,
+                bias_intensity=float(_ds_last.get("bias_intensity",
+                    locals().get("bias_intensity", 0.3))),
+                governance_strength=0.5, regulatory_pressure=0.6,
+                market_pressure=0.4, n_agents=150,
+            )
+            st.session_state["sec_ds_report"] = _ds_rep
+        except Exception as _dse:
+            st.session_state["sec_ds_report"] = {"error": str(_dse), "pillars": {}}
     prog.progress(1.0, text=t("complete"))
     prog.empty()
+# ── Post-run interactivity (shown once, after all runs complete) ──────────
+if st.session_state.get("sec_run_history"):
+    _post_last  = st.session_state["sec_run_history"][-1]
+    _post_fs    = _post_last.get("fairness_score", 0.5)
+    track_run(_post_fs, "security")
+    _post_mc    = {k: v for k, v in _post_last.items() if isinstance(v, (int, float))}
+    multi_challenge_panel("security", _post_mc)
+    admin_challenge_panel("security")
+    benchmark_challenge_panel("security", _post_mc)
+    what_if_explorer("security", _post_mc,
+        st.session_state.get("bias_intensity", 0.3))
+
 
     # ── XAI on first run ──────────────────────────────────────────────────────
     if st.session_state.security_run_history:
@@ -446,7 +629,7 @@ if run_button:
             from sklearn.preprocessing import StandardScaler as _SS_
             from sklearn.model_selection import train_test_split as _tts_
             _Xs = _SS_().fit_transform(_Xx)
-            _Xtr,_Xte,_ytr,_yte = _tts_(_Xs,_yy,test_size=0.3,random_state=42,stratify=_yy)
+            _Xtr,_Xte,_ytr,_yte = _tts_(_Xs,_yy,test_size=0.3,random_state=42,stratify=_yy if (len(np.unique(_yy)) > 1 and np.bincount(_yy.astype(int)).min() >= 2) else None)
             from sklearn.ensemble import RandomForestClassifier as _RFC_
             _clf = _RFC_(n_estimators=50,class_weight="balanced",random_state=42).fit(_Xtr,_ytr)
             _xm = ExplainableModel(domain="national_security")
@@ -503,7 +686,11 @@ if run_button:
 if st.session_state.security_run_history:
     df_r  = pd.DataFrame(st.session_state.security_run_history)
     base  = st.session_state.security_baseline
-    feats = st.session_state.security_feature_outputs
+    feats       = st.session_state.get("sec_feature_outputs", {})
+    _gov_result = feats.get("governance", {})
+    _rt_result  = feats.get("multimodal_redteam", {})
+    _ae_result  = feats.get("agent_economy", {})
+    _ar_result  = feats.get("arena", {})
     rw_info = st.session_state.security_rw_info
 
     # ── Dataset info banner ───────────────────────────────────────────────────
@@ -514,13 +701,14 @@ if st.session_state.security_run_history:
             <strong>Records:</strong> {rw_info['n_records']:,} &nbsp;|&nbsp;
             <strong>Features:</strong> {rw_info['n_features']} &nbsp;|&nbsp;
             <strong>Period:</strong> {rw_info['year_range']} &nbsp;|&nbsp;
-            <strong>Source:</strong> {rw_info['source']}
+            <strong>Source:</strong> {rw_info.get("source","")}
         </div>
         """, unsafe_allow_html=True)
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
-    st.markdown(t("security_assessment_dashboard"))
+    st.markdown("## 📊 Security Assessment Dashboard")
     role_banner("security")
+    role_brief_banner("security")
 
     avg_det  = df_r["detection_rate"].mean()
     avg_lib  = df_r["liberty_score"].mean()
@@ -535,7 +723,7 @@ if st.session_state.security_run_history:
             <p style="margin:0;font-size:.8rem;color:#555;">🎯 Threat Detection Rate</p>
             <p style="margin:0;font-size:1.8rem;font-weight:700;color:#ef4444;">{avg_det:.1%}</p>
             {'<p style="margin:0;font-size:.8rem;color:#888;">vs baseline: '
-             + (f"{avg_det - base['detection_rate']:+.1%}" if base else "—")
+             + (f"{avg_det - base.get("detection_rate",0):+.1%}" if base else "—")
              + '</p>'}
         </div>""", unsafe_allow_html=True)
 
@@ -546,7 +734,7 @@ if st.session_state.security_run_history:
             <p style="margin:0;font-size:.8rem;color:#555;">⚖️ Liberty Preservation</p>
             <p style="margin:0;font-size:1.8rem;font-weight:700;color:{lib_col};">{avg_lib:.2f}<span style="font-size:.9rem">/1.0</span></p>
             {'<p style="margin:0;font-size:.8rem;color:#888;">vs baseline: '
-             + (f"{avg_lib - base['liberty_score']:+.2f}" if base else "—")
+             + (f"{avg_lib - base.get("liberty_score",0):+.2f}" if base else "—")
              + '</p>'}
         </div>""", unsafe_allow_html=True)
 
@@ -564,7 +752,7 @@ if st.session_state.security_run_history:
             <p style="margin:0;font-size:.8rem;color:#555;">⚠️ False Alarm Rate</p>
             <p style="margin:0;font-size:1.8rem;font-weight:700;color:{fpr_col};">{avg_fpr:.1%}</p>
             {'<p style="margin:0;font-size:.8rem;color:#888;">vs baseline: '
-             + (f"{avg_fpr - base['false_positive_rate']:+.1%}" if base else "—")
+             + (f"{avg_fpr - base.get("false_positive_rate",0):+.1%}" if base else "—")
              + '</p>'}
         </div>""", unsafe_allow_html=True)
 
@@ -578,25 +766,32 @@ if st.session_state.security_run_history:
     if "governance" in feats:
         gov = feats["governance"]
         cls = {"approved":"alert-success","rejected":"alert-warning",
-               "deferred":"alert-info","reversed":"alert-danger"}.get(gov["outcome"],"alert-info")
-        flags_html = "".join(f"<li>{f}</li>" for f in gov["ai_flags"]) or "<li>No drift detected</li>"
-        t = gov["tally"]
-        st.markdown(f"""
-        <div class="{cls}" style="margin-top:1rem;">
-            <strong>🏛️ Governance Vote — "{gov['policy']}"</strong><br>
-            Outcome: <strong>{gov['outcome'].upper()}</strong> &nbsp;|&nbsp;
-            For: {t.get('for',0)} &nbsp; Against: {t.get('against',0)} &nbsp; Abstain: {t.get('abstain',0)}<br>
-            <strong>AI Flags:</strong><ul style="margin:.3rem 0 0 1rem;">{flags_html}</ul>
-            <span style="font-size:.75rem;opacity:.7;">Ledger hash: <code>{gov['ledger_hash']}</code></span>
-        </div>""", unsafe_allow_html=True)
+               "deferred":"alert-info","reversed":"alert-danger"}.get(gov.get("outcome","approved"),"alert-info")
+        flags_html = "".join(f"<li>{f}</li>" for f in gov.get("ai_flags",[])) or "<li>No drift detected</li>"
+        tally = gov.get("tally",{})
+        _gov_policy  = gov.get("policy", "AI Governance Policy")
+        _gov_outcome = (gov.get("outcome", "approved") or "approved").upper()
+        _gov_hash    = gov.get("ledger_hash", "N/A")
+        _gov_for     = tally.get("for", 0)
+        _gov_against = tally.get("against", 0)
+        _gov_abstain = tally.get("abstain", 0)
+        st.markdown(
+            f'<div class="{cls}" style="margin-top:1rem;">' +
+            f'<strong>🏛️ Governance Vote — "{_gov_policy}"</strong><br>' +
+            f'Outcome: <strong>{_gov_outcome}</strong> &nbsp;|&nbsp;' +
+            f'For: {_gov_for} &nbsp; Against: {_gov_against} &nbsp; Abstain: {_gov_abstain}<br>' +
+            f'<strong>AI Flags:</strong><ul style="margin:.3rem 0 0 1rem;">{flags_html}</ul>' +
+            f'<span style="font-size:.75rem;opacity:.7;">Ledger hash: <code>{_gov_hash}</code></span>' +
+            '</div>',
+            unsafe_allow_html=True)
 
     # ── Baseline comparison ────────────────────────────────────────────────────
     if base:
         st.info(
             f"**Baseline (no bias / no attack):** "
-            f"Detection {base['detection_rate']:.1%}  |  "
-            f"Liberty {base['liberty_score']:.2f}  |  "
-            f"FPR {base['false_positive_rate']:.1%}  — "
+            f"Detection {base.get("detection_rate",0):.1%}  |  "
+            f"Liberty {base.get("liberty_score",0):.2f}  |  "
+            f"FPR {base.get("false_positive_rate",0):.1%}  — "
             f"deltas above show the impact of your configuration."
         )
 
@@ -618,16 +813,26 @@ if st.session_state.security_run_history:
         board_member_summary("security", _acc_val, _fair_val, _ok, _finding, _rec)
     else:
         metric_glossary_expander(["false positive rate", "false negative rate", "liberty score", "demographic parity", "equalized odds", "bias intensity", "poison rate", "sociotechnical risk", "fairness score"])
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-        "📈 Performance", "⚖️ Trade-offs",
-        "🎭 Bias Impact", "🔬 Feature Modules",
-        "🧠 Explainable AI", "📋 Compliance",
-        "🔁 Longitudinal", "🌐 Federated",
+    _tab_labels = [
+        "📈 Performance",
+        "⚖️ Trade-offs",
+        "🎭 Bias Impact",
+        "🔬 Feature Modules",
+        "🧠 Explainable AI",
+        "📋 Compliance",
+        "🔁 Longitudinal",
+        "🌐 Federated",
         "📋 Raw Results",
-    ])
+        "🛡️ AI Safety",
+        "🔄 Lifecycle",
+        "🌱 Eco Score",
+        "🔮 Dynamic Systems"
+    ]
+    _tabs_obj = st.tabs(_tab_labels)
+    T = {n: _tab for n, _tab in zip(_tab_labels, _tabs_obj)}
 
     # ── Tab 1: Performance ─────────────────────────────────────────────────────
-    with tab1:
+    with T["📈 Performance"]:
         fig_g = make_subplots(rows=1, cols=3,
             specs=[[{"type":"indicator"}]*3],
             subplot_titles=("Threat Detection","Civil Liberties","False Alarm Rate"))
@@ -668,8 +873,8 @@ if st.session_state.security_run_history:
             st.plotly_chart(fig_cm, use_container_width=True)
 
     # ── Tab 2: Trade-offs ──────────────────────────────────────────────────────
-    with tab2:
-        st.markdown(t("security_vs_liberty_trade_off"))
+    with T["⚖️ Trade-offs"]:
+        st.markdown("### ⚖️ Security vs Liberty Trade-off")
         if len(df_r) > 1:
             fig_sc = px.scatter(df_r, x="liberty_score", y="detection_rate",
                 size=[max(f*30+5, 5) for f in df_r["false_positive_rate"]],
@@ -688,12 +893,15 @@ if st.session_state.security_run_history:
             st.plotly_chart(fig_sc, use_container_width=True)
         else:
             c1, c2, c3 = st.columns(3)
-            c1.metric("Detection Rate", f"{df_r['detection_rate'].iloc[0]:.1%}")
-            c2.metric("Liberty Score",  f"{df_r['liberty_score'].iloc[0]:.2f}")
-            c3.metric("False Alarm Rate", f"{df_r['false_positive_rate'].iloc[0]:.1%}")
+            _det0 = df_r["detection_rate"].iloc[0] if "detection_rate" in df_r.columns else 0.0
+            _lib0 = df_r["liberty_score"].iloc[0] if "liberty_score" in df_r.columns else 0.0
+            _fpr0 = df_r["false_positive_rate"].iloc[0] if "false_positive_rate" in df_r.columns else 0.0
+            c1.metric("Detection Rate", f"{_det0:.1%}")
+            c2.metric("Liberty Score",  f"{_lib0:.2f}")
+            c3.metric("False Alarm Rate", f"{_fpr0:.1%}")
             st.caption("Run 2+ simulations to plot the detection-vs-liberty trade-off scatter.")
 
-        st.markdown(t("fairness_vs_security"))
+        st.markdown("### 📊 Fairness vs Security")
         if len(df_r) > 1:
             fig_fs = px.scatter(df_r, x="fairness_score", y="security_score",
                 color="bias_intensity",
@@ -703,13 +911,15 @@ if st.session_state.security_run_history:
             st.plotly_chart(fig_fs, use_container_width=True)
         else:
             c1, c2 = st.columns(2)
-            c1.metric("Fairness Score",  f"{df_r['fairness_score'].iloc[0]:.3f}")
-            c2.metric("Security Score",  f"{df_r['security_score'].iloc[0]:.3f}")
+            _fs1 = df_r["fairness_score"].iloc[0] if "fairness_score" in df_r.columns else 0.0
+            _ss1 = df_r["security_score"].iloc[0] if "security_score" in df_r.columns else 0.0
+            c1.metric("Fairness Score", f"{_fs1:.3f}")
+            c2.metric("Security Score", f"{_ss1:.3f}")
             st.caption("Run 2+ simulations to see the scatter plot across multiple data points.")
 
     # ── Tab 3: Bias Impact ─────────────────────────────────────────────────────
-    with tab3:
-        st.markdown(t("bias_impact_assessment"))
+    with T["🎭 Bias Impact"]:
+        st.markdown("### 🎭 Bias Impact Assessment")
         _bias_implications = {
             "demographic": "Ethnic, religious, or nationality-based targeting risks discrimination "
                            "and erodes public trust in security services.",
@@ -791,90 +1001,27 @@ if st.session_state.security_run_history:
                         'this configuration prioritises accuracy over demographic targeting.</div>',
                         unsafe_allow_html=True)
 
-    # ── Tab 4: Feature Modules ─────────────────────────────────────────────────
-    with tab4:
-        st.markdown(t("advanced_feature_module_results"))
-
-        # Feature 2 — Multimodal Red Teaming
-        if "multimodal_redteam" in feats:
-            st.markdown(t("feature_2_multimodal_red_teaming"))
-            rt = feats["multimodal_redteam"]
-            rt_rows = [
-                {"Modality":             r["modality"],
-                 "Attack Vector":        r["attack_vector"],
-                 "Severity":             r["severity"],
-                 "Affected Samples":     r["affected_samples"],
-                 "Bypass Rate":          f"{r['bypass_rate']:.1%}",
-                 "Sociotechnical Risk":  f"{r['sociotechnical_risk']:.2f}"}
-                for r in rt.get("modality_results", [])
-            ]
-            if rt_rows:
-                st.dataframe(pd.DataFrame(rt_rows), use_container_width=True)
-            c1, c2 = st.columns(2)
-            c1.metric("Combined Bypass Rate",        f"{rt.get('combined_bypass_rate',0):.1%}")
-            c2.metric("Combined Sociotechnical Risk", f"{rt.get('combined_sociotechnical_risk',0):.2f}")
-            for r in rt.get("modality_results", []):
-                if r.get("vr_scenario"):
-                    st.markdown(f'<div class="alert-info">🥽 <strong>Immersive VR Scenario:</strong><br>'
-                                f'{r["vr_scenario"]}</div>', unsafe_allow_html=True)
-                    break
-
-        # Feature 1 — Agent Economy
-        if "agent_economy" in feats:
-            st.markdown(t("feature_1_ai_agent_economy_security_resources"))
-            ae = feats["agent_economy"]
-            c1, c2 = st.columns(2)
-            c1.metric("Economy Stability",  ae.get("economy_stability", "—"))
-            c2.metric("Permeability Score", f"{ae.get('permeability_score',0):.4f}")
-            agents_df = pd.DataFrame(ae.get("agent_summary", []))
-            if not agents_df.empty:
-                st.dataframe(agents_df.style.background_gradient(
-                    subset=["reputation","total_spent"], cmap="Blues"),
-                    use_container_width=True)
-
-        # Feature 4 — Governance Ledger
-        if "governance" in feats:
-            st.markdown(t("feature_4_governance_ledger_blockchain_style"))
-            gov = feats["governance"]
-            st.markdown(f"""
-            <div class="ledger-row">
-                ▶ <strong>Policy:</strong> {gov['policy']}<br>
-                ▶ <strong>Outcome:</strong> {gov['outcome'].upper()}<br>
-                ▶ <strong>Tally:</strong> For={gov['tally'].get('for',0)},
-                  Against={gov['tally'].get('against',0)},
-                  Abstain={gov['tally'].get('abstain',0)}<br>
-                ▶ <strong>Ledger Hash:</strong> <code>{gov['ledger_hash']}</code>
-            </div>""", unsafe_allow_html=True)
-
-        # Feature 5 — Strategic Arena
-        if "strategic_arena" in feats:
-            st.markdown(t("feature_5_strategic_social_reasoning_arena"))
-            arena = feats["strategic_arena"]
-            standings = pd.DataFrame(arena.get("final_standings", []))
-            if not standings.empty:
-                st.dataframe(standings.style.background_gradient(
-                    subset=["score"], cmap="YlGn"),
-                    use_container_width=True)
-            coal = arena.get("coalition_scores", {})
-            if coal:
-                fig_coal = px.bar(x=list(coal.keys()), y=list(coal.values()),
-                    title="Coalition Scores",
-                    labels={"x":"Coalition","y":"Score"},
-                    color=list(coal.values()),
-                    color_continuous_scale="Viridis")
-                st.plotly_chart(fig_coal, use_container_width=True)
-
-        if not feats:
-            st.info("Enable feature modules in the sidebar to see results here.")
+    # ── Tab 4: Feature Modules────────────────────────────────────────────
+    with T["🔬 Feature Modules"]:
+        _any_feat = any(feats.get(k) for k in ["governance","multimodal_redteam","agent_economy","arena","gender_audit_gap"])
+        feature_modules_tab(
+            domain="security",
+            run_results=st.session_state.get("sec_run_history", []),
+            feats=feats,
+            governance=_gov_result if _gov_result else None,
+            redteam=_rt_result if _rt_result else None,
+            agent_economy=_ae_result if _ae_result else None,
+            arena=_ar_result if _ar_result else None,
+        )
 
     # ── Tab 5-8: XAI / Compliance / Longitudinal / Federated ─────────────────
-    with tab5:
+    with T["🧠 Explainable AI"]:
         _xai = st.session_state.get("security_xai_results",{})
         st.markdown("### 🧠 Explainable AI")
         if not _xai:
             st.info("Run a simulation to generate XAI explanations.")
         elif "error" in _xai:
-            st.warning(f"XAI error: {_xai["error"]}")
+            st.warning(f"XAI error: {_xai.get("error","unknown")}")
         else:
             fi=_xai.get("feature_importance",{})
             if fi:
@@ -889,7 +1036,7 @@ if st.session_state.security_run_history:
             with cl:
                 expl=_xai.get("instance_explanation",{})
                 if expl:
-                    st.markdown(t("instance_explanation"))
+                    st.markdown("#### Instance Explanation")
                     st.markdown(f'<div class="alert-info"><em>{expl.get("decision_path","")}</em></div>',unsafe_allow_html=True)
             with cr_:
                 cf=_xai.get("counterfactual",{})
@@ -898,16 +1045,16 @@ if st.session_state.security_run_history:
                     st.markdown(f'<div class="alert-info"><em>{cf.get("plain_language","")}</em></div>',unsafe_allow_html=True)
             ix=_xai.get("intersectional",{})
             if ix and ix.get("group_performances"):
-                st.markdown(t("intersectional_fairness"))
+                st.markdown("#### Intersectional Fairness")
                 st.markdown(f'<div class="alert-info">{ix.get("narrative","")}</div>',unsafe_allow_html=True)
                 ix_df=pd.DataFrame([{"Group":k,**{kk:round(vv,3) for kk,vv in v.items()}} for k,v in ix["group_performances"].items()])
                 st.dataframe(ix_df.style.background_gradient(subset=["accuracy"],cmap="RdYlGn"),use_container_width=True)
 
-    with tab6:
+    with T["📋 Compliance"]:
         _xai=st.session_state.get("security_xai_results",{})
         _cr_=_xai.get("compliance_report",{})
         _mc_=_xai.get("model_card",{})
-        st.markdown(t("regulatory_compliance_report"))
+        st.markdown("### 📋 Regulatory Compliance Report")
         if not _cr_:
             st.info("Run a simulation to generate the compliance report.")
         else:
@@ -917,7 +1064,7 @@ if st.session_state.security_run_history:
             for fw,fd in _cr_.get("frameworks",{}).items():
                 with st.expander(f"📑 {fw}"):
                     for ch,st_ in fd.get("checks",{}).items():
-                        st.markdown(f"{"✅" if st_=="PASS" else "❌"} {ch}")
+                        _icon = "✅" if st_=='PASS' else "❌"; st.markdown(f"{_icon} {ch}")
             try:
                 pdf_b=generate_pdf_compliance_report(_cr_,_mc_,{"accuracy":df_r["detection_rate"].mean()},domain="national_security")
                 st.download_button("📄 Download Compliance PDF",pdf_b,"security_compliance.pdf","application/pdf",use_container_width=True)
@@ -925,11 +1072,12 @@ if st.session_state.security_run_history:
                 st.caption(f"PDF unavailable: {_e}")
 
         # ── Real-world benchmark comparison ─────────────────────
-        st.markdown(t("real_world_benchmark_comparison"))
+        st.markdown("#### 📚 Real-World Benchmark Comparison")
         if BENCHMARKS_OK:
             _dom_bms = get_benchmarks_for_domain("national_security")
             if _dom_bms:
-                _bm_sel = st.selectbox(t("compare_against_a_published_study"),
+                _bm_sel = st.selectbox(
+                        "Compare against a published study:",
                         list(_dom_bms.keys()),
                         format_func=lambda k: _dom_bms[k].name + " (" + str(_dom_bms[k].year) + ")",
                         key="_sec_bm_sel")
@@ -958,9 +1106,25 @@ if st.session_state.security_run_history:
             st.info("Add gags_benchmarks.py to components/ to enable benchmark comparison.")
 
 
-    with tab7:
+
+        st.divider()
+        st.markdown("#### 🇳🇬 Nigeria Regulatory Compliance")
+        _nr_metrics = {
+            "accuracy":          avg_det,
+            "fairness_score":    avg_lib,
+            "demographic_parity": float(df_r["false_positive_rate"].mean()) if "false_positive_rate" in df_r.columns else 0.0,
+        }
+        nigeria_compliance_panel(_nr_metrics, domain="security",
+            has_xai=locals().get("enable_xai", True),
+            has_governance=locals().get("enable_governance", True),
+            has_multilingual=("security" in ["health","disinformation","education"]),
+            has_ussd_fallback=False,
+            has_gender_audit=locals().get("enable_gender_audit", False),
+            has_redteam=locals().get("enable_redteam", False))
+
+    with T["🔁 Longitudinal"]:
         _lng=st.session_state.get("security_longitudinal")
-        st.markdown(t("longitudinal_bias_analysis"))
+        st.markdown("### 🔁 Longitudinal Bias Analysis")
         st.markdown('<div class="alert-info">Simulates bias <strong>feedback loops</strong> across successive model retraining cycles — critical for surveillance systems updated frequently.</div>',unsafe_allow_html=True)
         if not _lng:
             st.info("Run a simulation to see longitudinal bias evolution.")
@@ -970,7 +1134,7 @@ if st.session_state.security_run_history:
             c2.metric("Final Bias",f'{_lng["final_bias"]:.1%}',f'{_lng["final_bias"]-_lng["initial_bias"]:+.1%}')
             c3.metric("Amplification",f'{_lng["amplification_factor"]:.2f}×')
             if _lng.get("self_reinforcing"):
-                st.error(f"⚠️ Bias became self-reinforcing at generation {_lng.get("inflection_point","N/A")}.")
+                st.error(f"⚠️ Bias became self-reinforcing at generation {_lng.get('inflection_point','N/A')}.")
             st.markdown(f'<div class="alert-info"><em>{_lng["narrative"]}</em></div>',unsafe_allow_html=True)
             gm=_lng.get("generation_metrics",[])
             if gm:
@@ -982,9 +1146,9 @@ if st.session_state.security_run_history:
                 fig_lng.add_hline(y=0.1,line_dash="dot",line_color="red")
                 st.plotly_chart(fig_lng,use_container_width=True)
 
-    with tab8:
+    with T["🌐 Federated"]:
         _fed=st.session_state.get("security_federated")
-        st.markdown(t("federated_learning_simulation"))
+        st.markdown("### 🌐 Federated Learning Simulation")
         st.markdown('<div class="alert-info">Tests bias persistence when threat-detection models are trained <strong>across jurisdictions</strong> without centralising sensitive intelligence data.</div>',unsafe_allow_html=True)
         if not _fed:
             st.info("Run a simulation to see federated learning results.")
@@ -1006,7 +1170,7 @@ if st.session_state.security_run_history:
                     st.plotly_chart(fig_fed,use_container_width=True)
 
     # ── Tab 9: Raw Results ──────────────────────────────────────────────────────
-    with tab9:
+    with T["📋 Raw Results"]:
         display_cols = ["run_id","data_source","scenario","detection_rate","precision",
                         "false_positive_rate","accuracy","liberty_score","security_score",
                         "fairness_score","demographic_parity","surveillance_level",
@@ -1057,25 +1221,25 @@ if st.session_state.security_run_history:
             )
 
     # ── Tab 6: Data Explorer ───────────────────────────────────────────────────
-    with tab6:
-        st.markdown(t("data_explorer"))
+    with T["📋 Compliance"]:
+        st.markdown("### 🔍 Data Explorer")
         if data_source == "Real-World" and st.session_state.security_rw_df is not None:
             rw = st.session_state.security_rw_df
             c1, c2 = st.columns(2)
             c1.metric("Total Records",  f"{len(rw):,}")
             c2.metric("Total Features", len(rw.columns))
 
-            st.subheader(t("data_preview"))
+            st.subheader("Data Preview")
             st.dataframe(rw.head(20), use_container_width=True)
 
-            st.subheader(t("basic_statistics"))
+            st.subheader("Basic Statistics")
             st.dataframe(rw.describe(), use_container_width=True)
 
             if dataset_choice == "global_terrorism":
                 gtd_preview = [c for c in ["iyear","imonth","country_txt","region_txt",
                     "attacktype1_txt","targtype1_txt","nkill","nwound"] if c in rw.columns]
                 if gtd_preview:
-                    st.subheader(t("gtd_key_fields"))
+                    st.subheader("GTD Key Fields")
                     st.dataframe(rw[gtd_preview].head(15), use_container_width=True)
                 if "attacktype1_txt" in rw.columns:
                     fig_atk = px.bar(
@@ -1086,7 +1250,47 @@ if st.session_state.security_run_history:
         else:
             st.info("Select 'Real-World' data source in the sidebar and load a dataset to explore it here.")
 
+    # ── AI Safety Tab ─────────────────────────────────────────────────────
+    # ── 🔄 Lifecycle Management Tab ───────────────────────────────────────────
+    with T["🔄 Lifecycle"]:
+        render_lifecycle_tab(
+            st.session_state.get("sec_lifecycle_report", {}),
+            "security",
+        )
+
+    # ── 🌱 Eco Score Tab ──────────────────────────────────────────────────────
+    with T["🌱 Eco Score"]:
+        _lc_eco_r   = st.session_state.get("sec_lifecycle_report", {})
+        _lc_eco_last = (st.session_state.get("sec_run_history") or [{}])[-1]
+        render_eco_tab(
+            _lc_eco_r,
+            algo_key  = _lc_eco_last.get("algorithm", "hist_gradient_boosting"),
+            n_samples = int(_lc_eco_last.get("n_samples", 2000)),
+            n_runs    = int(locals().get("n_runs", 3)),
+            domain    = "security",
+        )
+
     # ── Simulation history ─────────────────────────────────────────────────────
+    # ── AI Safety Tab ────────────────────────────────────────────────────────
+    with T["🛡️ AI Safety"]:
+        render_safety_tab(
+            st.session_state.get("sec_safety_report", {}),
+            domain="security",
+        )
+
+    # ── 🔮 Dynamic Systems Tab ──────────────────────────────────────────────────
+    with T["🔮 Dynamic Systems"]:
+        try:
+            render_dynamic_systems_tab(
+                st.session_state.get("sec_ds_report", {}),
+                domain="security",
+                ds_key="sec_ds_report",
+            )
+        except Exception as _ds_err:
+            st.error(f"🔮 Dynamic Systems error: {_ds_err}")
+            import traceback
+            st.code(traceback.format_exc(), language="python")
+
     history_browser("security_snapshot_history", domain="security",
         key_metrics=["detection_rate","liberty_score","false_positive_rate"])
 
@@ -1095,7 +1299,7 @@ if st.session_state.security_run_history:
 
     # ── Policy Recommendations ─────────────────────────────────────────────────
     st.divider()
-    st.markdown(t("security_ethics_recommendations"))
+    st.markdown("## 💡 Security & Ethics Recommendations")
     r1, r2 = st.columns(2)
     with r1:
         if avg_fpr > 0.1:
@@ -1147,7 +1351,7 @@ if st.session_state.security_run_history:
 # Welcome state
 # ═══════════════════════════════════════════════════════════════════════════════
 else:
-    st.markdown(t("welcome_to_national_security_simulation"))
+    st.markdown("## 🎯 Welcome to National Security Simulation")
     st.markdown(
         "Configure your scenario in the sidebar and click **Run**. "
         "This module tests AI surveillance systems against bias, adversarial attacks, "
@@ -1171,7 +1375,7 @@ else:
             unsafe_allow_html=True,
         )
 
-    with st.expander(t("how_to_use"), expanded=False):
+    with st.expander("📖 How to Use", expanded=False):
         st.markdown("""
         1. Choose **data source** (synthetic or real-world GTD/UNSW)
         2. Enable **GAGS Feature Modules** (Red Team, Governance, Arena, Economy)

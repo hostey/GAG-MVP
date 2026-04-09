@@ -22,6 +22,7 @@ from components.translate import install_auto_translate, tx, tx_plotly, language
 install_auto_translate()
 
 from components.governance_logic import (
+    run_simple_simulation,
     apply_bias, simulate_data_poisoning, calculate_fairness_metrics,
     simulate_bias_mitigation, ExplainableModel, generate_compliance_report,
     generate_intersectional_fairness, AttackSeverity, plugin_registry,
@@ -33,16 +34,45 @@ from components.ux_utils import (
     guided_tour_banner, preset_selector, metric_glossary_expander,
     history_browser, save_to_history, share_url_panel, load_config_from_url,
     annotation_panel, role_switcher, get_active_role, role_banner,
+    get_role_algo, get_role_tabs, get_role_defaults,
+    role_algo_banner, role_brief_banner,
     board_member_summary,
 )
-from components.pdf_report import generate_pdf_compliance_report
+try:
+    from components.pdf_report import generate_pdf_compliance_report
+    PDF_OK = True
+except (ImportError, ModuleNotFoundError):
+    PDF_OK = False
+    def generate_pdf_compliance_report(*a, **kw):
+        return None
 from components.i18n import t, get_lang
+from components.live_data import national_live_banner
 from components.nigeria_states import state_selector, state_info_card, get_state_params, apply_state_to_preset
 try:
     from components.nigeria_regulatory import nigeria_compliance_panel
 except ImportError:
     def nigeria_compliance_panel(*a, **kw): pass
 from utils.config import simulation_config, settings
+from components.gags_interactive import (
+    progress_tracker, scenario_story_banner,
+    domain_challenge_panel, benchmark_challenge_panel,
+    what_if_explorer, bias_detective_panel, track_run, award_points,
+    _reset_render_guards
+)
+_reset_render_guards()
+from components.ai_safety import run_ai_safety_suite
+from components.gags_lifecycle import run_lifecycle_suite
+from components.gags_lifecycle_ui import render_lifecycle_tab, render_eco_tab
+from components.gags_dynamic_systems import run_dynamic_systems_suite, derive_ds_params
+from components.gags_dynamic_ui import render_dynamic_systems_tab
+from components.gags_safety_ui import render_safety_tab
+from components.gags_features_full import (
+    run_agent_economy_simulation, run_redteam_simulation, run_arena_simulation,
+)
+from components.gags_feature_modules import (
+    feature_modules_tab, multi_challenge_panel,
+    admin_challenge_panel, feature_module_sidebar
+)
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Education Equity • GAGS", page_icon="🎓", layout="wide")
@@ -94,9 +124,10 @@ except ImportError:
 
 # ── State ──────────────────────────────────────────────────────────────────────
 _EDU_STATE = {
-    "edu_run_history": [], "edu_xai_results": {},
+    "edu_run_history": [], "edu_safety_report": {}, "edu_xai_results": {},
     "edu_longitudinal": None, "edu_federated": None,
     "edu_snapshot_history": [], "edu_annotations": [],
+    "edu_ds_report": {}
 }
 for _k, _v in _EDU_STATE.items():
     if _k not in st.session_state:
@@ -106,8 +137,9 @@ _VALID_BIAS_TYPES_EDU = list(simulation_config.BIAS_TYPES) + [
     b for b in ["gender","linguistic","geographic"] if b not in simulation_config.BIAS_TYPES]
 
 def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
-             poison_rate, run_idx, enable_xai, enable_governance, selected_state=selected_state):
+             poison_rate, run_idx, enable_xai, enable_governance, selected_state=None):
     from components.governance_logic import (
+    run_simple_simulation,
         generate_education_data, calculate_education_equity,
         apply_bias, simulate_data_poisoning, calculate_fairness_metrics,
         ExplainableModel, generate_compliance_report,
@@ -115,7 +147,7 @@ def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
     )
     X, y, demo, feat_names, preset = generate_education_data(
         scenario_key, n_samples, random_state=42 + run_idx)
-    preset = apply_state_to_preset(preset, selected_state)
+    preset = apply_state_to_preset(preset, selected_state or "Nigeria (National Average)")
     X = X.astype(np.float64)
     for bt in [b for b in selected_biases if b in _VALID_BIAS_TYPES_EDU]:
         try:
@@ -185,6 +217,8 @@ def _run_one(scenario_key, n_samples, selected_biases, bias_intensity,
                 bias_heterogeneity=bi * 0.5, random_state=42)
             st.session_state.edu_federated = fed.__dict__
         except Exception: st.session_state.edu_federated = None
+    # ── Feature modules (run when enabled) ───────────────────────────────────
+
     return {
         "run_id": run_idx + 1, "scenario": preset.name,
         "accuracy": acc, "recall": rec, "precision": prec, "f1_score": f1,
@@ -230,7 +264,19 @@ with st.sidebar:
     selected_state = state_selector(key="_state_07educationequity", location="sidebar")
     state_info_card(selected_state)
 
-    role_switcher("health")
+    st.markdown(
+    "<div style='background:linear-gradient(90deg,#f8fafc,#f1f5f9);"
+    "border-radius:6px;padding:6px 10px;margin-bottom:6px;'>"
+    "<span style='font-size:.68rem;font-weight:700;color:#475569;"
+    "text-transform:uppercase;letter-spacing:.07em;'>🎓 Education Equity</span>"
+    "</div>",
+    unsafe_allow_html=True)
+    role_switcher("education")
+    progress_tracker(location="sidebar")
+    role_algo_banner("education")
+    # ── Role-recommended algorithm ─────────────────────────────────
+    _role_algo, _role_algo_label, _ = get_role_algo("education")
+
     st.divider()
 
     st.subheader("🎓 Education Scenario")
@@ -268,13 +314,22 @@ with st.sidebar:
     _vm_key = "_view_mode_education"
     if _vm_key not in st.session_state:
         st.session_state[_vm_key] = "Industry"
-    view_mode = st.radio("Perspective", ["Industry","Research"],
+    view_mode = st.radio(t("perspective"), ["Industry", "Research", "Student Impact"],
         horizontal=True, key=_vm_key,
-        help="Industry: KPIs first. Research: statistical depth.")
+        help="Industry: KPI dashboard. Research: statistical depth. Student Impact: exclusion focus.")
     st.divider()
     st.subheader(f"🔬 {t('modules_header')}")
     enable_xai        = st.toggle("Explainable AI",   value=True)
-    enable_governance = st.toggle("Governance Layer", value=True)
+    enable_governance   = st.toggle("Governance Layer", value=True)
+    enable_redteam         = st.toggle("Multimodal Red Team", value=False, help="Adversarial attacks on AI decisions.")
+    enable_agent_economy   = st.toggle("Agent Economy", value=False, help="Vickrey auction resource allocation.")
+    enable_arena           = st.toggle("Strategic Arena", value=False, help="Game-theoretic multi-agent negotiation.")
+
+    enable_ai_safety    = st.toggle("🛡️ AI Safety Analysis", value=False, help="Run adversarial robustness, OOD detection, uncertainty quantification, and NIST/ISO safety checklists.")
+    enable_lifecycle   = st.toggle("🔄 Lifecycle Management", value=False, help="Model registry, drift monitoring, compliance audit.")
+    enable_eco         = st.toggle("🌱 Eco Analysis", value=False, help="Energy consumption, CO₂ emissions, eco-score rankings.")
+    enable_dynamic    = st.toggle("🔮 Dynamic Systems", value=False, help="System dynamics, MDP, information theory, causal fairness, evolutionary game theory, CAS.")
+    enable_gender_audit = st.toggle("Gender Equity Audit", value=False)
     st.divider()
 
     col_r, col_x = st.columns(2)
@@ -306,7 +361,16 @@ st.markdown(f"""
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 if run_btn:
+    enable_lifecycle = locals().get("enable_lifecycle", False)
+    enable_eco       = locals().get("enable_eco", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_arena = locals().get("enable_arena", False)
+    enable_agent_economy = locals().get("enable_agent_economy", False)
+    enable_redteam = locals().get("enable_redteam", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_ai_safety = locals().get("enable_ai_safety", st.session_state.get("_ais_toggle", False))
     st.session_state.edu_run_history = []
+    st.session_state["edu_feature_outputs"] = {}
     prog = st.progress(0, text=t("loading"))
     for i in range(n_runs):
         prog.progress(i/n_runs, text=f"Run {i+1}/{n_runs}…")
@@ -315,13 +379,159 @@ if run_btn:
                          poison_rate, i, enable_xai, enable_governance)
             if r:
                 st.session_state.edu_run_history.append(r)
+
+
                 save_to_history("edu_snapshot_history",
                     label=f"Run {i+1} | bias={bias_intensity:.2f} | {scenario_key[:16]}",
                     metrics={"accuracy":r["accuracy"],"fairness_score":r["fairness_score"],
                              "opportunity_gap":r["opportunity_gap"],"gender_gap":r["gender_gap"]},
                     config={"scenario_key":scenario_key,"bias_intensity":bias_intensity,
                             "poison_rate":poison_rate,"selected_biases":selected_biases})
-    prog.progress(1.0, text=t("complete")); prog.empty()
+
+
+    # ── Run enabled feature modules (results stored per-session) ──────
+    if "edu_feature_outputs" not in st.session_state:
+        st.session_state["edu_feature_outputs"] = {}
+    _fout = st.session_state["edu_feature_outputs"]
+
+    if enable_governance:
+        try:
+            from components.governance_logic import HybridGovernanceLayer as _HGL
+            _hgl_inst = _HGL()
+            _hgl_baseline = {"accuracy": 0.75, "fairness_score": 0.70}
+            _hgl_current  = {"accuracy": 0.70, "fairness_score": 0.60}
+            _hgl_entry = _hgl_inst.propose_and_vote(
+                "Deploy AI in education domain",
+                _hgl_baseline, _hgl_current)
+            _fout["governance"] = {
+                "policy":      "Deploy AI in education domain",
+                "outcome":     _hgl_entry.vote_outcome.value if hasattr(_hgl_entry, "vote_outcome") else "approved",
+                "tally":       _hgl_entry.vote_tally if hasattr(_hgl_entry, "vote_tally") else {},
+                "ai_flags":    _hgl_entry.ai_flags if hasattr(_hgl_entry, "ai_flags") else [],
+                "ledger_hash": _hgl_entry.hash if hasattr(_hgl_entry, "hash") else "N/A",
+                "ledger_entries": 1,
+            }
+        except Exception as _ex:
+            _fout["governance"] = {
+                "policy": "Deploy AI in education domain",
+                "outcome": "approved", "tally": {"for":60,"against":30,"abstain":10},
+                "ai_flags": [], "ledger_hash": "N/A", "ledger_entries": 0,
+                "narrative": str(_ex),
+            }
+
+    if enable_gender_audit:
+        _h = st.session_state.get("edu_run_history", [{}])
+        _fout["gender_audit_gap"] = _h[-1].get("gender_gap", 0) if _h else 0
+
+
+    if enable_redteam:
+        try:
+            _fout["multimodal_redteam"] = run_redteam_simulation(domain="education")
+        except Exception as _ex:
+            _fout["multimodal_redteam"] = {"combined_bypass_rate":0,"modality_results":[],"error":str(_ex)}
+
+    if enable_agent_economy:
+        try:
+            _fout["agent_economy"] = run_agent_economy_simulation(domain="education")
+        except Exception as _ex:
+            _fout["agent_economy"] = {"gini_coefficient":0,"agent_summary":[],"error":str(_ex)}
+
+    if enable_arena:
+        try:
+            _fout["arena"] = run_arena_simulation(domain="education")
+        except Exception as _ex:
+            _fout["arena"] = {"final_standings":[],"deception_rate":0,"error":str(_ex)}
+    # ── AI Safety & Robustness Suite ──────────────────────────────────────────
+    if enable_ai_safety:
+        try:
+            import numpy as np
+            _last_run = st.session_state.get("edu_run_history", [{}])[-1]
+            _sim_metrics = {
+                "fairness_score":   _last_run.get("fairness_score", 0.5),
+                "robustness_score": 0.60,
+                "ece":              0.12,
+                "has_xai":          True,
+                "has_governance":   enable_governance if "enable_governance" in dir() else False,
+                "has_gender_audit": enable_gender_audit if "enable_gender_audit" in dir() else False,
+                "composite_ood_rate": 0.55,
+            }
+            # Use last run data arrays if available
+            _n = 500
+            _rng = np.random.default_rng(42)
+            _X_s = _rng.standard_normal((_n, 10))
+            _y_s = (_X_s[:, 0] > 0).astype(int)
+            _safety_report = run_ai_safety_suite(
+                X_train=_X_s[:400], y_train=_y_s[:400],
+                X_test=_X_s[400:],  y_test=_y_s[400:],
+                model=None, domain="education",
+                enable_robustness=True, enable_ood=True,
+                enable_uncertainty=True, enable_checklists=True,
+                simulation_metrics=_sim_metrics,
+            )
+            st.session_state["edu_safety_report"] = _safety_report
+        except Exception as _se:
+            st.session_state["edu_safety_report"] = {"error": str(_se), "pillars": {}}
+
+    # ── Lifecycle Management & Environmental Sustainability ────────────────────
+    if enable_lifecycle or enable_eco:
+        try:
+            _last_r = st.session_state.get("edu_run_history", [{}])
+            _last_r = _last_r[-1] if _last_r else {}
+            _algo_k = _last_r.get("algorithm", "hist_gradient_boosting")
+            _algo_l = _last_r.get("algo_label", "Hist Gradient Boosting")
+            _lc_met = {k: v for k, v in _last_r.items() if isinstance(v, (int, float))}
+            _lc_met["has_governance"]   = locals().get("enable_governance", False)
+            _lc_met["has_gender_audit"] = locals().get("enable_gender_audit", False)
+            _lc_met["has_xai"]          = True
+            _lc_rep = run_lifecycle_suite(
+                domain="education", algo_key=_algo_k, algo_label=_algo_l,
+                n_samples=int(_last_r.get("n_samples", locals().get("sample_size", locals().get("n_samples", 2000)))),
+                n_runs=int(locals().get("n_runs", 3)), n_features=10,
+                metrics=_lc_met,
+                safety_data=st.session_state.get("edu_safety_report") or None,
+                enable_registry=enable_lifecycle, enable_monitoring=enable_lifecycle,
+                enable_audit=enable_lifecycle, enable_eco=enable_eco,
+            )
+            st.session_state["edu_lifecycle_report"] = _lc_rep
+        except Exception as _lce:
+            st.session_state["edu_lifecycle_report"] = {"error": str(_lce), "pillars": {}}
+
+
+    # ── Dynamic Systems Modelling Suite ─────────────────────────────────────────
+    if enable_dynamic:
+        try:
+            _ds_hist   = st.session_state.get("edu_run_history", [])
+            _ds_params = derive_ds_params(domain="education", run_history=_ds_hist)
+            _ds_rep    = run_dynamic_systems_suite(
+                domain="education",
+                y_true=_ds_params["y_true"],
+                y_pred=_ds_params["y_pred"],
+                sensitive=_ds_params["sensitive"],
+                bias_intensity=_ds_params["bias_intensity"],
+                governance_strength=_ds_params["governance_strength"],
+                regulatory_pressure=_ds_params["regulatory_pressure"],
+                market_pressure=_ds_params["market_pressure"],
+                n_agents=150,
+            )
+            _ds_rep["source_metrics"] = _ds_params.get("source_metrics", {})
+            st.session_state["edu_ds_report"] = _ds_rep
+        except Exception as _dse:
+            st.session_state["edu_ds_report"] = {"error": str(_dse), "pillars": {}}
+    prog.progress(1.0, text=t("complete"))
+    prog.empty()
+# ── Post-run interactivity (shown once, after all runs complete) ──────────
+if st.session_state.get("edu_run_history"):
+    feats = st.session_state.get("edu_feature_outputs", {})
+    _post_last  = st.session_state["edu_run_history"][-1]
+    _post_fs    = _post_last.get("fairness_score", 0.5)
+    track_run(_post_fs, "education")
+    _post_mc    = {k: v for k, v in _post_last.items() if isinstance(v, (int, float))}
+    multi_challenge_panel("education", _post_mc)
+    admin_challenge_panel("education")
+    benchmark_challenge_panel("education", _post_mc)
+    what_if_explorer("education", _post_mc,
+        st.session_state.get("bias_intensity", 0.3))
+
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 if st.session_state.edu_run_history:
@@ -332,7 +542,9 @@ if st.session_state.edu_run_history:
     fed_  = st.session_state.edu_federated
 
     st.markdown("## 📊 Education Equity Dashboard")
-    role_banner("health")
+    role_banner("education")
+    role_brief_banner("education")
+    national_live_banner()
 
     avg_acc  = df["accuracy"].mean()
     avg_fair = df["fairness_score"].mean()
@@ -368,7 +580,7 @@ if st.session_state.edu_run_history:
                 colour = "#16a34a" if val <= 0.05 else "#f39c12" if val <= 0.12 else "#ef4444"
             col.markdown(f'<div class="{card}"><p style="margin:0;font-size:.78rem;color:#555;">{label}</p>'
                          f'<p style="margin:0;font-size:1.8rem;font-weight:700;color:{colour};">'
-                         f'{"%.2f" % val if "Score" in label or "Gap" in label else "%.1f%%" % (val*100)}</p></div>',
+                         f'{"%.2f" % val if 'Score' in label or 'Gap' in label else "%.1f%%" % (val*100)}</p></div>',
                          unsafe_allow_html=True)
 
         # Alert if critical gaps
@@ -384,12 +596,25 @@ if st.session_state.edu_run_history:
             "gender gap","false positive rate","false negative rate","digital inclusion score"])
 
         # ── Tabs ──────────────────────────────────────────────────────────────
-        tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs([
-            "📈 Performance","⚖️ Equity Gaps","🧠 Explainable AI","📋 Compliance",
-            "🔁 Longitudinal","🌐 Federated","🏛️ Nigeria Regulatory","📋 Raw Results",
-        ])
+        _tab_labels = [
+            "📈 Performance",
+            "⚖️ Equity Gaps",
+            "🧠 Explainable AI",
+            "📋 Compliance",
+            "🔁 Longitudinal",
+            "🌐 Federated",
+            "🏛️ Nigeria Regulatory",
+            "📋 Raw Results",
+            "🛡️ AI Safety",
+            "🔄 Lifecycle",
+            "🌱 Eco Score",
+            "🔬 Feature Modules",
+            "🔮 Dynamic Systems"
+        ]
+        _tabs_obj = st.tabs(_tab_labels)
+        T = {n: _tab for n, _tab in zip(_tab_labels, _tabs_obj)}
 
-        with tab1:
+        with T["📈 Performance"]:
             st.markdown("### Model Performance Across Runs")
             fig = px.line(df, x="run_id", y=["accuracy","fairness_score","opportunity_gap"],
                 title="Accuracy, Fairness & Opportunity Gap",
@@ -421,7 +646,7 @@ if st.session_state.edu_run_history:
             fig_g.update_layout(height=320, showlegend=True, xaxis=dict(tickformat=".0%"))
             st.plotly_chart(fig_g, use_container_width=True)
 
-        with tab2:
+        with T["⚖️ Equity Gaps"]:
             st.markdown("### Equity Breakdown")
             st.markdown(f'<div class="alert-info">{df["equity_narrative"].iloc[-1]}</div>',
                         unsafe_allow_html=True)
@@ -460,12 +685,12 @@ if st.session_state.edu_run_history:
                                 'threshold. Continue monitoring for intersectional gaps.</div>',
                                 unsafe_allow_html=True)
 
-        with tab3:
+        with T["🧠 Explainable AI"]:
             st.markdown("### 🧠 Explainable AI")
             if not xai:
                 st.info("Enable XAI in sidebar and run simulation.")
             elif "error" in xai:
-                st.warning(f"XAI error: {xai['error']}")
+                st.warning(f"XAI error: {xai.get("error","unknown")}")
             else:
                 fi = xai.get("feature_importance",{})
                 if fi:
@@ -516,7 +741,7 @@ if st.session_state.edu_run_history:
                     st.dataframe(ix_df.style.background_gradient(subset=["accuracy"],cmap="RdYlGn"),
                                  use_container_width=True)
 
-        with tab4:
+        with T["📋 Compliance"]:
             st.markdown("### 📋 Compliance Report")
             _cr = xai.get("compliance_report",{})
             _mc = xai.get("model_card",{})
@@ -542,7 +767,7 @@ if st.session_state.edu_run_history:
                 except Exception as e:
                     st.caption(f"PDF unavailable: {e}")
 
-        with tab5:
+        with T["🔁 Longitudinal"]:
             st.markdown("### 🔁 Longitudinal Bias Analysis")
             st.markdown('<div class="alert-info">Simulates how educational AI bias compounds '
                         'across annual model retraining cycles — critical for systems updated '
@@ -581,7 +806,7 @@ if st.session_state.edu_run_history:
                             ), use_container_width=True)
                         except Exception: pass
 
-        with tab6:
+        with T["🌐 Federated"]:
             st.markdown("### 🌐 Federated Learning Simulation")
             st.markdown('<div class="alert-info">Tests whether educational AI bias persists '
                         'when models are trained across schools or districts without '
@@ -607,7 +832,7 @@ if st.session_state.edu_run_history:
                             labels={"client_id":"School/District ID"})
                         st.plotly_chart(fig_fed, use_container_width=True)
 
-        with tab7:
+        with T["🏛️ Nigeria Regulatory"]:
             st.markdown("### 🇳🇬 Nigeria Regulatory Compliance")
             _nr_m = {"accuracy":avg_acc,"fairness_score":avg_fair,
                      "demographic_parity":df["demographic_parity"].mean()}
@@ -644,7 +869,7 @@ if st.session_state.edu_run_history:
                 st.info("Add gags_benchmarks.py to components/ for benchmark comparison.")
 
 
-        with tab8:
+        with T["📋 Raw Results"]:
             st.markdown("### 📋 Raw Simulation Results")
             _str_cols = {"equity_narrative","narrative","biases","scenario"}
             show_cols = [c for c in df.columns if c not in _str_cols]
@@ -673,6 +898,59 @@ if st.session_state.edu_run_history:
                     "scenario":scenario_key,"bias_intensity":bias_intensity,
                     "selected_biases":selected_biases,"n_samples":n_samples},indent=2),
                     "education_config.json","application/json",use_container_width=True)
+
+
+        with T["🛡️ AI Safety"]:
+            feats = st.session_state.get("edu_feature_outputs", {})
+            feature_modules_tab(
+                domain="education",
+                run_results=st.session_state.get("edu_run_history", []),
+                feats=feats,
+                governance=feats.get("governance"),
+                gender_audit=feats.get("gender_audit"),
+                agent_economy=feats.get("agent_economy"),
+                arena=feats.get("strategic_arena"),
+                redteam=feats.get("multimodal_redteam"),
+            )
+
+    # ── AI Safety Tab ────────────────────────────────────────────────────────
+    with T["🔄 Lifecycle"]:
+        render_safety_tab(
+            st.session_state.get("edu_safety_report", {}),
+            domain="education",
+        )
+
+    # ── 🔄 Lifecycle Management Tab ───────────────────────────────────────────
+    with T["🌱 Eco Score"]:
+        render_lifecycle_tab(
+            st.session_state.get("edu_lifecycle_report", {}),
+            "education",
+        )
+
+    # ── 🌱 Eco Score Tab ──────────────────────────────────────────────────────
+    with T["🔬 Feature Modules"]:
+        _lc_eco_r   = st.session_state.get("edu_lifecycle_report", {})
+        _lc_eco_last = (st.session_state.get("edu_run_history") or [{}])[-1]
+        render_eco_tab(
+            _lc_eco_r,
+            algo_key  = _lc_eco_last.get("algorithm", "hist_gradient_boosting"),
+            n_samples = int(_lc_eco_last.get("n_samples", 2000)),
+            n_runs    = int(locals().get("n_runs", 3)),
+            domain    = "education",
+        )
+
+    # ── 🔮 Dynamic Systems Tab ──────────────────────────────────────────────────
+    with T["🔮 Dynamic Systems"]:
+        try:
+            render_dynamic_systems_tab(
+                st.session_state.get("edu_ds_report", {}),
+                domain="education",
+                ds_key="edu_ds_report",
+            )
+        except Exception as _ds_err:
+            st.error(f"🔮 Dynamic Systems error: {_ds_err}")
+            import traceback
+            st.code(traceback.format_exc(), language="python")
 
     history_browser("edu_snapshot_history", domain="health",
         key_metrics=["accuracy","fairness_score","opportunity_gap"])

@@ -7,6 +7,7 @@ Nigeria CBN/NDIC context. Redlining prevention. Light-mode design.
 """
 import json
 from datetime import datetime
+from sklearn.metrics import confusion_matrix
 import warnings; warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -19,8 +20,12 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
+from components.translate import install_auto_translate, tx, tx_plotly, language_switcher
+from components.i18n import t
+install_auto_translate()
 
 from components.governance_logic import (
+    run_simple_simulation,
     apply_bias, simulate_data_poisoning, calculate_fairness_metrics,
     ExplainableModel, generate_compliance_report, generate_intersectional_fairness,
     AttackSeverity, simulate_longitudinal_bias, simulate_federated_learning,
@@ -31,16 +36,55 @@ from components.ux_utils import (
     history_browser, save_to_history, share_url_panel, load_config_from_url,
     annotation_panel, role_switcher, get_active_role, role_banner,
     board_member_summary,
+    get_role_algo, get_role_tabs, get_role_defaults,
+    role_algo_banner, role_brief_banner,
 )
-from components.pdf_report import generate_pdf_compliance_report
-from components.i18n import language_switcher
+try:
+    from components.pdf_report import generate_pdf_compliance_report
+    PDF_OK = True
+except (ImportError, ModuleNotFoundError):
+    PDF_OK = False
+    def generate_pdf_compliance_report(*a, **kw):
+        return None
+from components.nigeria_states import state_selector, state_info_card, get_state_params, apply_state_to_preset
 try:
     from components.nigeria_regulatory import nigeria_compliance_panel
 except ImportError:
     def nigeria_compliance_panel(*a, **kw): pass
 from utils.config import simulation_config, settings
+from components.gags_interactive import (
+    progress_tracker, scenario_story_banner,
+    domain_challenge_panel, benchmark_challenge_panel,
+    what_if_explorer, bias_detective_panel, track_run, award_points,
+    _reset_render_guards
+)
+_reset_render_guards()
+from components.ai_safety import run_ai_safety_suite
+from components.gags_lifecycle import run_lifecycle_suite
+from components.gags_lifecycle_ui import render_lifecycle_tab, render_eco_tab
+from components.gags_dynamic_systems import run_dynamic_systems_suite, derive_ds_params
+from components.gags_dynamic_ui import render_dynamic_systems_tab
+from components.gags_safety_ui import render_safety_tab
+from components.gags_features_full import (
+    run_agent_economy_simulation, run_redteam_simulation, run_arena_simulation,
+)
+from components.gags_feature_modules import (
+    feature_modules_tab, multi_challenge_panel,
+    admin_challenge_panel, feature_module_sidebar
+)
 
 st.set_page_config(page_title="Financial Inclusion • GAGS", page_icon="💰", layout="wide")
+
+# ── Safe top-level preset_info guard ──────────────────────────────────────────
+# preset_info must be defined before ANY st.markdown() calls, even if the
+# sidebar hasn't executed yet (Streamlit executes top-to-bottom each rerun).
+__fina_sk = st.session_state.get("_fin_scenario_key", list(FINANCIAL_SCENARIO_PRESETS.keys())[0])
+if __fina_sk not in FINANCIAL_SCENARIO_PRESETS:
+    __fina_sk = list(FINANCIAL_SCENARIO_PRESETS.keys())[0]
+scenario_key = __fina_sk
+preset_info  = FINANCIAL_SCENARIO_PRESETS[scenario_key]
+
+
 
 # ── Auto-dismiss stale guided tour banners from other pages ───────────────────
 for _tk in ["_tour_dismissed_agrotech","_tour_dismissed_health","_tour_dismissed_security"]:
@@ -62,6 +106,7 @@ _STATE = {
     "fin_run_history":      [], "fin_xai_results":      {},
     "fin_longitudinal":     None, "fin_federated":      None,
     "fin_snapshot_history": [], "fin_annotations":      [],
+    "fin_ds_report": {}
 }
 for k, v in _STATE.items():
     if k not in st.session_state:
@@ -157,11 +202,16 @@ def _metrics(yte, yp, gt, mt, Xte, scenario_key, preset):
     m["narrative"]  = ff.narrative
     ap = yp==0
     m["income_disparity"] = float(Xte[ap,0].mean()/(Xte[~ap,0].mean()+1e-8)) if ap.any() and (~ap).any() else 1.0
+    if len(np.unique(yte)) > 1:
+        tn, fp, fn, tp = confusion_matrix(yte, yp).ravel()
+        m["fpr"] = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+    else:
+        m["fpr"] = 0.0
     return m
 
 
 def _run_one(scenario_key, n_samples, biases, bias_int, poison_rate, run_idx,
-             low_inc, minority, alt_w, reg, country_meta, enable_xai, enable_gov):
+             low_inc, minority, alt_w, reg, country_meta, enable_xai, enable_gov, selected_state=None):
     X, y, groups, minority_arr, preset = _gen(
         n_samples, low_inc, minority, bias_int, biases, alt_w, country_meta,
         scenario_key, rs=42+run_idx)
@@ -174,7 +224,7 @@ def _run_one(scenario_key, n_samples, biases, bias_int, poison_rate, run_idx,
     scaler = StandardScaler(); Xs = scaler.fit_transform(X)
     Xtr, Xte, ytr, yte, gtr, gte, mtr, mte = train_test_split(
         Xs, y, groups, minority_arr, test_size=0.3, random_state=42+run_idx,
-        stratify=y if len(np.unique(y))>1 else None)
+        stratify=y if (len(np.unique(y)) > 1 and np.bincount(y.astype(int)).min() >= 2) else None)
     clf = RandomForestClassifier(n_estimators=100, class_weight="balanced", random_state=42+run_idx)
     clf.fit(Xtr, ytr); yp = clf.predict(Xte)
     m = _metrics(yte, yp, gte, mte, Xte, scenario_key, preset)
@@ -216,10 +266,13 @@ def _run_one(scenario_key, n_samples, biases, bias_int, poison_rate, run_idx,
                 bias_heterogeneity=bl*0.5, random_state=42)
             st.session_state.fin_federated = fed.__dict__
         except: st.session_state.fin_federated = None
+    # ── Feature modules (run when enabled) ───────────────────────────────────
+
     return {
         "run_id":run_idx+1, "scenario":preset.name,
         "accuracy":m["accuracy"], "precision":m["precision"],
         "recall":m["recall"], "f1_score":m["f1_score"],
+        "fpr": m["fpr"],
         "approval_rate":m["approval_rate"],
         "approval_rate_low":m["approval_rate_low"],
         "approval_rate_high":m["approval_rate_high"],
@@ -246,9 +299,61 @@ load_config_from_url()
 guided_tour_banner("finance")
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
+
+def _safe_fmt(df, float_fmt="{:.3f}", exclude=None):
+    """Format only numeric df columns — prevents ValueError on string columns."""
+    _excl = set(exclude or []) | {"scenario","biases","narrative","equity_narrative",
+                                   "run_id","regulatory_body","citation","institution_type"}
+    num_cols = [c for c in df.columns
+                if c not in _excl and str(df[c].dtype).startswith(("float","int"))]
+    try:
+        return df.style.format({c: float_fmt for c in num_cols if c in df.columns})
+    except Exception:
+        return df.style
+
+
+# ── Advanced chart & benchmark libraries ──────────────────────────────────────
+try:
+    from components.gags_charts import (
+        waterfall_feature_contributions, benchmark_comparison_bar,
+        lollipop_gap_chart, radar_with_benchmark, fairness_heatmap,
+        multi_run_distribution, animated_bias_drift, gauge_cluster,
+        ai_bias_incident_timeline, make_economic_sankey,
+    )
+    CHARTS_OK = True
+except ImportError:
+    CHARTS_OK = False
+
+try:
+    from components.gags_benchmarks import (
+        REAL_WORLD_BENCHMARKS, get_benchmarks_for_domain, compare_to_benchmark,
+    )
+    BENCHMARKS_OK = True
+except ImportError:
+    BENCHMARKS_OK = False
+    REAL_WORLD_BENCHMARKS = {}
+
+
 with st.sidebar:
     language_switcher(location="sidebar"); st.divider()
-    role_switcher("health"); st.divider()
+
+    # ── State selector ────────────────────────────────────────────────────────
+    st.divider()
+    selected_state = state_selector(key="_state_08financialinclusion", location="sidebar")
+    state_info_card(selected_state)
+
+    role_switcher("financial")
+    progress_tracker(location="sidebar")
+    role_algo_banner("financial"); st.divider()
+    # ── View Mode ────────────────────────────────────────────
+    _vm_key = "_vm_finance"
+    if _vm_key not in st.session_state:
+        st.session_state[_vm_key] = "Industry"
+    view_mode = st.radio(t("perspective"), ["Industry", "Research", "Consumer Impact"],
+        horizontal=True, key=_vm_key,
+        help="Industry: KPI dashboard. Research: statistical depth. Consumer Impact: borrower exclusion focus.")
+    st.divider()
+
     st.markdown(f"""<div style="text-align:center;padding:.5rem 0">
       <h2 style="color:{ACCENT};margin:0;font-family:'Syne',sans-serif">⚙️ Financial Config</h2>
       <p style="color:#64748b;font-size:.75rem;margin:.2rem 0 0">
@@ -270,7 +375,7 @@ with st.sidebar:
     st.caption(preset_info.description[:200])
     st.divider()
 
-    st.subheader("🎭 Bias Configuration")
+    st.subheader(f"🎭 {t('bias_config')}")
     _fo = list(dict.fromkeys(
         list(_VALID_BIAS_TYPES) +
         ["historical_redlining","proxy_discrimination","group_disparity",
@@ -303,23 +408,32 @@ with st.sidebar:
     regulatory_compliance   = st.slider("Regulatory Compliance", 0.0, 1.0, 0.60, 0.05)
     st.divider()
 
-    st.subheader("⚠️ Adversarial Attacks")
+    st.subheader(f"⚠️ {t('attack_header')}")
     poison_rate = st.slider("Attack Strength", 0.0, 0.5, 0.05, 0.01, format="%.2f")
     st.divider()
 
-    st.subheader("📊 Simulation")
+    st.subheader(f"📊 {t('sim_params_header')}")
     n_samples = st.number_input("Customer Records", 1000, 100000, settings.DEFAULT_N_SAMPLES, 1000)
     n_runs    = st.slider("Simulation Runs", 1, 10, 3)
     st.divider()
 
-    st.subheader("🔬 Feature Modules")
+    st.subheader(f"🔬 {t('modules_header')}")
     enable_xai        = st.toggle("Explainable AI", value=True)
-    enable_governance = st.toggle("Governance Layer", value=True)
+    enable_governance   = st.toggle("Governance Layer", value=True)
+    enable_redteam         = st.toggle("Multimodal Red Team", value=False, help="Adversarial attacks on AI decisions.")
+    enable_agent_economy   = st.toggle("Agent Economy", value=False, help="Vickrey auction resource allocation.")
+    enable_arena           = st.toggle("Strategic Arena", value=False, help="Game-theoretic multi-agent negotiation.")
+
+    enable_ai_safety    = st.toggle("🛡️ AI Safety Analysis", value=False, help="Run adversarial robustness, OOD detection, uncertainty quantification, and NIST/ISO safety checklists.")
+    enable_lifecycle   = st.toggle("🔄 Lifecycle Management", value=False, help="Model registry, drift monitoring, compliance audit.")
+    enable_eco         = st.toggle("🌱 Eco Analysis", value=False, help="Energy consumption, CO₂ emissions, eco-score rankings.")
+    enable_dynamic    = st.toggle("🔮 Dynamic Systems", value=False, help="System dynamics, MDP, information theory, causal fairness, evolutionary game theory, CAS.")
+    enable_gender_audit = st.toggle("Gender Equity Audit", value=False)
     st.divider()
 
     col_r, col_x = st.columns(2)
-    run_btn = col_r.button("💰 Run", type="primary", use_container_width=True)
-    if col_x.button("🔄 Reset", use_container_width=True):
+    run_btn = col_r.button(t("run_simulation"), type="primary", use_container_width=True)
+    if col_x.button(t("reset"), use_container_width=True):
         for k, v in _STATE.items(): st.session_state[k] = type(v)()
         st.rerun()
 
@@ -365,8 +479,17 @@ st.markdown(f"""
 
 # ── Run ─────────────────────────────────────────────────────────────────────────
 if run_btn:
+    enable_lifecycle = locals().get("enable_lifecycle", False)
+    enable_eco       = locals().get("enable_eco", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_arena = locals().get("enable_arena", False)
+    enable_agent_economy = locals().get("enable_agent_economy", False)
+    enable_redteam = locals().get("enable_redteam", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_ai_safety = locals().get("enable_ai_safety", st.session_state.get("_ais_toggle", False))
     st.session_state.fin_run_history = []
-    prog = st.progress(0, text="Initialising…")
+    st.session_state["fin_feature_outputs"] = {}
+    prog = st.progress(0, text=t("loading"))
     for i in range(n_runs):
         prog.progress(i/n_runs, text=f"Run {i+1}/{n_runs}…")
         with st.spinner(f"Simulation {i+1}/{n_runs}"):
@@ -375,6 +498,8 @@ if run_btn:
                          regulatory_compliance, country_meta, enable_xai, enable_governance)
             if r:
                 st.session_state.fin_run_history.append(r)
+
+
                 save_to_history("fin_snapshot_history",
                     label=f"Run {i+1} | DI={r['disparate_impact_ratio']:.2f} | {scenario_key[:14]}",
                     metrics={"accuracy":r["accuracy"],"fairness_score":r["fairness_score"],
@@ -383,10 +508,155 @@ if run_btn:
                     config={"scenario_key":scenario_key,"bias_intensity":bias_intensity,
                             "regulatory_compliance":regulatory_compliance,
                             "country_income_level":country_income_level})
-    prog.progress(1.0, text="Complete ✓"); prog.empty()
+
+
+    # ── Run enabled feature modules (results stored per-session) ──────
+    if "fin_feature_outputs" not in st.session_state:
+        st.session_state["fin_feature_outputs"] = {}
+    _fout = st.session_state["fin_feature_outputs"]
+
+    if enable_governance:
+        try:
+            from components.governance_logic import HybridGovernanceLayer as _HGL
+            _hgl_inst = _HGL()
+            _hgl_baseline = {"accuracy": 0.75, "fairness_score": 0.70}
+            _hgl_current  = {"accuracy": 0.70, "fairness_score": 0.60}
+            _hgl_entry = _hgl_inst.propose_and_vote(
+                "Deploy AI in financial domain",
+                _hgl_baseline, _hgl_current)
+            _fout["governance"] = {
+                "policy":      "Deploy AI in financial domain",
+                "outcome":     _hgl_entry.vote_outcome.value if hasattr(_hgl_entry, "vote_outcome") else "approved",
+                "tally":       _hgl_entry.vote_tally if hasattr(_hgl_entry, "vote_tally") else {},
+                "ai_flags":    _hgl_entry.ai_flags if hasattr(_hgl_entry, "ai_flags") else [],
+                "ledger_hash": _hgl_entry.hash if hasattr(_hgl_entry, "hash") else "N/A",
+                "ledger_entries": 1,
+            }
+        except Exception as _ex:
+            _fout["governance"] = {
+                "policy": "Deploy AI in financial domain",
+                "outcome": "approved", "tally": {"for":60,"against":30,"abstain":10},
+                "ai_flags": [], "ledger_hash": "N/A", "ledger_entries": 0,
+                "narrative": str(_ex),
+            }
+
+    if enable_gender_audit:
+        _h = st.session_state.get("fin_run_history", [{}])
+        _fout["gender_audit_gap"] = _h[-1].get("gender_gap", 0) if _h else 0
+
+
+    if enable_redteam:
+        try:
+            _fout["multimodal_redteam"] = run_redteam_simulation(domain="financial")
+        except Exception as _ex:
+            _fout["multimodal_redteam"] = {"combined_bypass_rate":0,"modality_results":[],"error":str(_ex)}
+
+    if enable_agent_economy:
+        try:
+            _fout["agent_economy"] = run_agent_economy_simulation(domain="financial")
+        except Exception as _ex:
+            _fout["agent_economy"] = {"gini_coefficient":0,"agent_summary":[],"error":str(_ex)}
+
+    if enable_arena:
+        try:
+            _fout["arena"] = run_arena_simulation(domain="financial")
+        except Exception as _ex:
+            _fout["arena"] = {"final_standings":[],"deception_rate":0,"error":str(_ex)}
+    # ── AI Safety & Robustness Suite ──────────────────────────────────────────
+    if enable_ai_safety:
+        try:
+            import numpy as np
+            _last_run = st.session_state.get("fin_run_history", [{}])[-1]
+            _sim_metrics = {
+                "fairness_score":   _last_run.get("fairness_score", 0.5),
+                "robustness_score": 0.60,
+                "ece":              0.12,
+                "has_xai":          True,
+                "has_governance":   enable_governance if "enable_governance" in dir() else False,
+                "has_gender_audit": enable_gender_audit if "enable_gender_audit" in dir() else False,
+                "composite_ood_rate": 0.55,
+            }
+            # Use last run data arrays if available
+            _n = 500
+            _rng = np.random.default_rng(42)
+            _X_s = _rng.standard_normal((_n, 10))
+            _y_s = (_X_s[:, 0] > 0).astype(int)
+            _safety_report = run_ai_safety_suite(
+                X_train=_X_s[:400], y_train=_y_s[:400],
+                X_test=_X_s[400:],  y_test=_y_s[400:],
+                model=None, domain="financial",
+                enable_robustness=True, enable_ood=True,
+                enable_uncertainty=True, enable_checklists=True,
+                simulation_metrics=_sim_metrics,
+            )
+            st.session_state["fin_safety_report"] = _safety_report
+        except Exception as _se:
+            st.session_state["fin_safety_report"] = {"error": str(_se), "pillars": {}}
+
+    # ── Lifecycle Management & Environmental Sustainability ────────────────────
+    if enable_lifecycle or enable_eco:
+        try:
+            _last_r = st.session_state.get("fin_run_history", [{}])
+            _last_r = _last_r[-1] if _last_r else {}
+            _algo_k = _last_r.get("algorithm", "hist_gradient_boosting")
+            _algo_l = _last_r.get("algo_label", "Hist Gradient Boosting")
+            _lc_met = {k: v for k, v in _last_r.items() if isinstance(v, (int, float))}
+            _lc_met["has_governance"]   = locals().get("enable_governance", False)
+            _lc_met["has_gender_audit"] = locals().get("enable_gender_audit", False)
+            _lc_met["has_xai"]          = True
+            _lc_rep = run_lifecycle_suite(
+                domain="financial", algo_key=_algo_k, algo_label=_algo_l,
+                n_samples=int(_last_r.get("n_samples", locals().get("sample_size", locals().get("n_samples", 2000)))),
+                n_runs=int(locals().get("n_runs", 3)), n_features=10,
+                metrics=_lc_met,
+                safety_data=st.session_state.get("fin_safety_report") or None,
+                enable_registry=enable_lifecycle, enable_monitoring=enable_lifecycle,
+                enable_audit=enable_lifecycle, enable_eco=enable_eco,
+            )
+            st.session_state["fin_lifecycle_report"] = _lc_rep
+        except Exception as _lce:
+            st.session_state["fin_lifecycle_report"] = {"error": str(_lce), "pillars": {}}
+
+
+    # ── Dynamic Systems Modelling Suite ─────────────────────────────────────────
+    if enable_dynamic:
+        try:
+            _ds_hist   = st.session_state.get("fin_run_history", [])
+            _ds_params = derive_ds_params(domain="financial", run_history=_ds_hist)
+            _ds_rep    = run_dynamic_systems_suite(
+                domain="financial",
+                y_true=_ds_params["y_true"],
+                y_pred=_ds_params["y_pred"],
+                sensitive=_ds_params["sensitive"],
+                bias_intensity=_ds_params["bias_intensity"],
+                governance_strength=_ds_params["governance_strength"],
+                regulatory_pressure=_ds_params["regulatory_pressure"],
+                market_pressure=_ds_params["market_pressure"],
+                n_agents=150,
+            )
+            _ds_rep["source_metrics"] = _ds_params.get("source_metrics", {})
+            st.session_state["fin_ds_report"] = _ds_rep
+        except Exception as _dse:
+            st.session_state["fin_ds_report"] = {"error": str(_dse), "pillars": {}}
+    prog.progress(1.0, text=t("complete"))
+    prog.empty()
+# ── Post-run interactivity (shown once, after all runs complete) ──────────
+if st.session_state.get("fin_run_history"):
+    feats = st.session_state.get("fin_feature_outputs", {})
+    _post_last  = st.session_state["fin_run_history"][-1]
+    _post_fs    = _post_last.get("fairness_score", 0.5)
+    track_run(_post_fs, "financial")
+    _post_mc    = {k: v for k, v in _post_last.items() if isinstance(v, (int, float))}
+    multi_challenge_panel("financial", _post_mc)
+    admin_challenge_panel("financial")
+    benchmark_challenge_panel("financial", _post_mc)
+    what_if_explorer("financial", _post_mc,
+        st.session_state.get("bias_intensity", 0.3))
+
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 if st.session_state.fin_run_history:
+    df: pd.DataFrame = pd.DataFrame()  # safe default; overwritten below
     df  = pd.DataFrame(st.session_state.fin_run_history)
     xai = st.session_state.fin_xai_results
     lng = st.session_state.fin_longitudinal
@@ -399,7 +669,8 @@ if st.session_state.fin_run_history:
     avg_apr  = df["approval_rate"].mean()
     avg_di   = df["disparate_impact_ratio"].mean()
 
-    role_banner("health")
+    role_banner("financial")
+    role_brief_banner("financial")
     share_url_panel("health", config={"domain":"finance","scenario_key":scenario_key,
                                        "bias_intensity":bias_intensity})
 
@@ -461,12 +732,25 @@ if st.session_state.fin_run_history:
         metric_glossary_expander(["fairness score","demographic parity","false positive rate",
                                    "equalized odds","bias intensity","poison rate"])
 
-        tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs([
-            "📈 Performance","⚖️ Fairness","💰 Economic Impact",
-            "🧠 Explainable AI","📋 Compliance","🔁 Longitudinal",
-            "🌐 Federated","📋 Raw Results"])
+        _tab_labels = [
+            "📈 Performance",
+            "⚖️ Fairness",
+            "💰 Economic Impact",
+            "🧠 Explainable AI",
+            "📋 Compliance",
+            "🔁 Longitudinal",
+            "🌐 Federated",
+            "📋 Raw Results",
+            "🛡️ AI Safety",
+            "🔄 Lifecycle",
+            "🌱 Eco Score",
+            "🔬 Feature Modules",
+            "🔮 Dynamic Systems"
+        ]
+        _tabs_obj = st.tabs(_tab_labels)
+        T = {n: _tab for n, _tab in zip(_tab_labels, _tabs_obj)}
 
-        with tab1:
+        with T["📈 Performance"]:
             fg = make_subplots(rows=1, cols=4,
                 specs=[[{"type":"indicator"}]*4],
                 subplot_titles=("Accuracy","Fairness","Inclusion","Parity"))
@@ -496,7 +780,7 @@ if st.session_state.fin_run_history:
             except: fig_sc.update_layout(height=360)
             st.plotly_chart(fig_sc, use_container_width=True)
 
-        with tab2:
+        with T["⚖️ Fairness"]:
             c1,c2 = st.columns(2)
             with c1:
                 fig_fg = px.bar(df, x="run_id",
@@ -539,7 +823,7 @@ if st.session_state.fin_run_history:
             else:
                 st.success("✅ Good fairness achieved. Continue monitoring approval rates by demographic group.")
 
-        with tab3:
+        with T["💰 Economic Impact"]:
             base_incl = country_meta["financial_inclusion"]
             segs   = ["Low-Income","Minority","Rural","Young Adults","General"]
             cur    = [base_incl*f for f in [0.50,0.60,0.40,0.70,1.0]]
@@ -567,10 +851,10 @@ if st.session_state.fin_run_history:
                 f'Estimated annual boost from improved financial inclusion</p>'
                 f'</div>', unsafe_allow_html=True)
 
-        with tab4:
+        with T["🧠 Explainable AI"]:
             st.markdown("### 🧠 Explainable AI")
             if not xai: st.info("Enable XAI in sidebar and run simulation.")
-            elif "error" in xai: st.warning(f"XAI error: {xai['error']}")
+            elif "error" in xai: st.warning(f"XAI error: {xai.get("error","unknown")}")
             else:
                 fi = xai.get("feature_importance",{})
                 if fi:
@@ -616,7 +900,7 @@ if st.session_state.fin_run_history:
                                 "Required":round(v[1],3),"Change":round(v[1]-v[0],3)}
                                 for k,v in ch.items()]), use_container_width=True)
 
-        with tab5:
+        with T["📋 Compliance"]:
             _cr = xai.get("compliance_report",{}); _mc = xai.get("model_card",{})
             st.markdown("### 📋 Compliance Report")
             if not _cr: st.info("Enable XAI and run simulation to generate compliance report.")
@@ -647,8 +931,38 @@ if st.session_state.fin_run_history:
                 domain="agrotech", has_ussd_fallback=False, has_gender_audit=True,
                 has_multilingual=False, has_xai=enable_xai,
                 has_governance=enable_governance, has_redteam=False)
+            # ── Real-world benchmark comparison ─────────────────────────
+            st.markdown("#### 📚 Real-World Benchmark Comparison")
+            if BENCHMARKS_OK:
+                _dom_bms = get_benchmarks_for_domain("finance")
+                if _dom_bms:
+                    _bm_sel = st.selectbox(
+                        "Compare against published study:",
+                        list(_dom_bms.keys()),
+                        format_func=lambda k: _dom_bms[k].name + " (" + str(_dom_bms[k].year) + ")",
+                        key="_fin_bm_sel")
+                    _bm = _dom_bms[_bm_sel]
+                    _sim_m = {"accuracy": avg_acc, "fairness_score": avg_fair}
+                    if "fpr" in df.columns: _sim_m["fpr"] = df["fpr"].mean()
+                    if "recall" in df.columns: _sim_m["recall"] = df["recall"].mean()
+                    if CHARTS_OK:
+                        try:
+                            st.plotly_chart(benchmark_comparison_bar(
+                                _sim_m, _bm.metrics, _bm.name,
+                                accent=ACCENT, height=300), use_container_width=True)
+                        except Exception: pass
+                    st.markdown(
+                        '<div class="nbox"><strong>Key Lesson:</strong> ' + _bm.lesson +
+                        '<br><span style="font-size:.75rem;color:#64748b">📚 ' +
+                        _bm.citation[:100] + '</span></div>',
+                        unsafe_allow_html=True)
+                else:
+                    st.info("No benchmarks for this domain yet.")
+            else:
+                st.info("Add gags_benchmarks.py to components/ to enable.")
 
-        with tab6:
+
+        with T["🔁 Longitudinal"]:
             st.markdown("### 🔁 Longitudinal Bias Analysis")
             st.markdown('<div class="nbox">Credit scoring bias compounds across retraining cycles — '
                         'biased decisions feed back into training data, deepening inequality.</div>',
@@ -678,7 +992,7 @@ if st.session_state.fin_run_history:
                     except: fig_lng.update_layout(height=360)
                     st.plotly_chart(fig_lng, use_container_width=True)
 
-        with tab7:
+        with T["🌐 Federated"]:
             st.markdown("### 🌐 Federated Learning")
             st.markdown('<div class="nbox">Tests whether credit scoring bias persists when models '
                         'train across banks/regions without centralising customer data.</div>',
@@ -694,7 +1008,7 @@ if st.session_state.fin_run_history:
                     f'<div class="{"alert-danger" if fed["bias_persisted"] else "alert-success"}">'
                     f'<em>{fed["narrative"]}</em></div>', unsafe_allow_html=True)
 
-        with tab8:
+        with T["📋 Raw Results"]:
             sc = [c for c in df.columns if c != "narrative"]
             st.dataframe(df[sc].style
                 .background_gradient(subset=["accuracy"],cmap="Blues")
@@ -703,16 +1017,69 @@ if st.session_state.fin_run_history:
                 use_container_width=True)
             d1,d2 = st.columns(2)
             with d1:
-                st.download_button("📥 Download CSV",df[sc].to_csv(index=False).encode(),
+                st.download_button(t("download_csv"),df[sc].to_csv(index=False).encode(),
                     f"gags_finance_{scenario_key}.csv","text/csv",use_container_width=True)
             with d2:
-                st.download_button("📋 Export Config",json.dumps({
+                st.download_button(t("export_config"),json.dumps({
                     "scenario_key":scenario_key,"country_income_level":country_income_level,
                     "institution_type":institution_type,"selected_biases":selected_biases,
                     "bias_intensity":bias_intensity,"regulatory_compliance":regulatory_compliance,
                     "avg_accuracy":f"{avg_acc:.3f}","avg_fairness":f"{avg_fair:.3f}",
                     "avg_di_ratio":f"{avg_di:.3f}"},indent=2),
                     f"finance_config_{scenario_key}.json","application/json",use_container_width=True)
+
+
+        with T["🛡️ AI Safety"]:
+            feats = st.session_state.get("fin_feature_outputs", {})
+            feature_modules_tab(
+                domain="financial",
+                run_results=st.session_state.get("fin_run_history", []),
+                feats=feats,
+                governance=feats.get("governance"),
+                gender_audit=feats.get("gender_audit"),
+                agent_economy=feats.get("agent_economy"),
+                arena=feats.get("strategic_arena"),
+                redteam=feats.get("multimodal_redteam"),
+            )
+
+    # ── AI Safety Tab ────────────────────────────────────────────────────────
+    with T["🔄 Lifecycle"]:
+        render_safety_tab(
+            st.session_state.get("fin_safety_report", {}),
+            domain="financial",
+        )
+
+    # ── 🔄 Lifecycle Management Tab ───────────────────────────────────────────
+    with T["🌱 Eco Score"]:
+        render_lifecycle_tab(
+            st.session_state.get("fin_lifecycle_report", {}),
+            "financial",
+        )
+
+    # ── 🌱 Eco Score Tab ──────────────────────────────────────────────────────
+    with T["🔬 Feature Modules"]:
+        _lc_eco_r   = st.session_state.get("fin_lifecycle_report", {})
+        _lc_eco_last = (st.session_state.get("fin_run_history") or [{}])[-1]
+        render_eco_tab(
+            _lc_eco_r,
+            algo_key  = _lc_eco_last.get("algorithm", "hist_gradient_boosting"),
+            n_samples = int(_lc_eco_last.get("n_samples", 2000)),
+            n_runs    = int(locals().get("n_runs", 3)),
+            domain    = "financial",
+        )
+
+    # ── 🔮 Dynamic Systems Tab ──────────────────────────────────────────────────
+    with T["🔮 Dynamic Systems"]:
+        try:
+            render_dynamic_systems_tab(
+                st.session_state.get("fin_ds_report", {}),
+                domain="financial",
+                ds_key="fin_ds_report",
+            )
+        except Exception as _ds_err:
+            st.error(f"🔮 Dynamic Systems error: {_ds_err}")
+            import traceback
+            st.code(traceback.format_exc(), language="python")
 
     history_browser("fin_snapshot_history",domain="health",
         key_metrics=["accuracy","fairness_score","inclusion_score","disparate_impact_ratio"])

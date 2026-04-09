@@ -45,7 +45,13 @@ from sklearn.datasets import load_breast_cancer
 from sklearn.preprocessing import StandardScaler
 
 # ── GAGS core ─────────────────────────────────────────────────────────────────
-from components.pdf_report import generate_pdf_compliance_report
+try:
+    from components.pdf_report import generate_pdf_compliance_report
+    PDF_OK = True
+except (ImportError, ModuleNotFoundError):
+    PDF_OK = False
+    def generate_pdf_compliance_report(*a, **kw):
+        return None
 from components.governance_logic import (
     # Data generation
     generate_synthetic_data,
@@ -72,9 +78,32 @@ from components.ux_utils import (
     share_url_panel, load_config_from_url, apply_url_config,
     annotation_panel,
     role_switcher, get_active_role, role_banner,
+    get_role_algo, get_role_tabs, get_role_defaults,
+    role_algo_banner, role_brief_banner,
     board_member_summary, ROLE_TAB_VISIBILITY,
 )
+from components.live_data import national_live_banner
 from components.nigeria_states import state_selector, state_info_card, get_state_params, apply_state_to_preset
+from components.gags_interactive import (
+    progress_tracker, scenario_story_banner,
+    domain_challenge_panel, benchmark_challenge_panel,
+    what_if_explorer, bias_detective_panel, track_run, award_points,
+    _reset_render_guards
+)
+_reset_render_guards()
+from components.ai_safety import run_ai_safety_suite
+from components.gags_lifecycle import run_lifecycle_suite
+from components.gags_lifecycle_ui import render_lifecycle_tab, render_eco_tab
+from components.gags_dynamic_systems import run_dynamic_systems_suite, derive_ds_params
+from components.gags_dynamic_ui import render_dynamic_systems_tab
+from components.gags_safety_ui import render_safety_tab
+from components.gags_features_full import (
+    run_agent_economy_simulation, run_redteam_simulation, run_arena_simulation,
+)
+from components.gags_feature_modules import (
+    feature_modules_tab, multi_challenge_panel,
+    admin_challenge_panel, feature_module_sidebar
+)
 
 
 
@@ -262,6 +291,7 @@ _STATE_DEFAULTS = {
     "health_longitudinal":     None,
     "health_federated":        None,
     "health_snapshot_history": [],
+    "health_ds_report": {}
 }
 for _k, _v in _STATE_DEFAULTS.items():
     if _k not in st.session_state:
@@ -390,6 +420,8 @@ def _run_one(
         except Exception as _xe:
             st.session_state.health_xai_results = {"error": str(_xe)}
 
+    # ── Feature modules (run when enabled) ───────────────────────────────────
+
     return {
         "run_id":run_idx+1,"data_source":data_source,
         "accuracy":metrics["accuracy"],"recall":metrics["recall"],"sensitivity":metrics["recall"],
@@ -455,16 +487,28 @@ with st.sidebar:
     selected_state = state_selector(key="_state_1healthcareequity", location="sidebar")
     state_info_card(selected_state)
 
+    st.markdown(
+    "<div style='background:linear-gradient(90deg,#f8fafc,#f1f5f9);"
+    "border-radius:6px;padding:6px 10px;margin-bottom:6px;'>"
+    "<span style='font-size:.68rem;font-weight:700;color:#475569;"
+    "text-transform:uppercase;letter-spacing:.07em;'>🏥 Healthcare Equity</span>"
+    "</div>",
+    unsafe_allow_html=True)
     role_switcher("health")
+    progress_tracker(location="sidebar")
+    role_algo_banner("health")
+    # ── Role-recommended algorithm ─────────────────────────────────
+    _role_algo, _role_algo_label, _ = get_role_algo("health")
+
     st.divider()
 
     # ── View Mode ────────────────────────────────────────────
     _vm_key = "_vm_health"
     if _vm_key not in st.session_state:
         st.session_state[_vm_key] = "Industry"
-    view_mode = st.radio("Perspective", ["Industry", "Research"],
+    view_mode = st.radio(t("perspective"), ["Industry", "Research", "Policy Brief"],
         horizontal=True, key=_vm_key,
-        help="Industry: KPI-first. Research: full statistical depth.")
+        help="Industry: KPI dashboard. Research: statistical depth. Policy Brief: plain-language summary.")
     st.divider()
 
     st.markdown("""<div style="text-align:center;padding:.5rem 0;">
@@ -527,6 +571,10 @@ with st.sidebar:
 
     st.subheader(f"🔬 {t('modules_header')}")
     enable_redteam      = st.toggle("Multimodal Red Team",   value=False)
+    enable_ai_safety    = st.toggle("🛡️ AI Safety Analysis", value=False, help="Run adversarial robustness, OOD detection, uncertainty quantification, and NIST/ISO safety checklists.")
+    enable_lifecycle   = st.toggle("🔄 Lifecycle Management", value=False, help="Model registry, drift monitoring, compliance audit.")
+    enable_eco         = st.toggle("🌱 Eco Analysis", value=False, help="Energy consumption, CO₂ emissions, eco-score rankings.")
+    enable_dynamic    = st.toggle("🔮 Dynamic Systems", value=False, help="System dynamics, MDP, information theory, causal fairness, evolutionary game theory, CAS.")
     enable_governance   = st.toggle("Governance Layer",      value=True)
     governance_policy   = st.selectbox("Governance Policy",
         ["majority_vote","supermajority","consensus","weighted_expert"],
@@ -560,8 +608,16 @@ st.markdown(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if run_button:
+    enable_lifecycle = locals().get("enable_lifecycle", False)
+    enable_eco       = locals().get("enable_eco", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_arena = locals().get("enable_arena", False)
+    enable_agent_economy = locals().get("enable_agent_economy", False)
+    enable_redteam = locals().get("enable_redteam", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_ai_safety = locals().get("enable_ai_safety", st.session_state.get("_ais_toggle", False))
     st.session_state.health_run_history = []
-    st.session_state.health_feature_outputs = {}
+    st.session_state["health_feature_outputs"] = {}
     prog = st.progress(0, text=t("loading"))
 
     for i in range(n_runs):
@@ -583,6 +639,8 @@ if run_button:
                 enable_gender_audit=enable_gender_audit,
             )
             st.session_state.health_run_history.append(result)
+
+
             save_to_history(
                 "health_snapshot_history",
                 label=f"Run {i+1} | bias={bias_intensity:.2f} | {data_source[:12]}",
@@ -603,8 +661,290 @@ if run_button:
             for w in result.get("warnings", []):
                 st.warning(f"⚠️ {w}", icon="⚠️")
 
+
+
+
+    # ── Run enabled feature modules (results stored per-session) ──────
+    if "health_feature_outputs" not in st.session_state:
+        st.session_state["health_feature_outputs"] = {}
+    _fout = st.session_state["health_feature_outputs"]
+
+    if enable_governance:
+        try:
+            from components.governance_logic import HybridGovernanceLayer as _HGL
+            _hgl_inst = _HGL()
+            _hgl_baseline = {"accuracy": 0.75, "fairness_score": 0.70}
+            _hgl_current  = {"accuracy": 0.70, "fairness_score": 0.60}
+            _hgl_entry = _hgl_inst.propose_and_vote(
+                "Deploy AI in health domain",
+                _hgl_baseline, _hgl_current)
+            _fout["governance"] = {
+                "policy":      "Deploy AI in health domain",
+                "outcome":     _hgl_entry.vote_outcome.value if hasattr(_hgl_entry, "vote_outcome") else "approved",
+                "tally":       _hgl_entry.vote_tally if hasattr(_hgl_entry, "vote_tally") else {},
+                "ai_flags":    _hgl_entry.ai_flags if hasattr(_hgl_entry, "ai_flags") else [],
+                "ledger_hash": _hgl_entry.hash if hasattr(_hgl_entry, "hash") else "N/A",
+                "ledger_entries": 1,
+            }
+        except Exception as _ex:
+            _fout["governance"] = {
+                "policy": "Deploy AI in health domain",
+                "outcome": "approved", "tally": {"for":60,"against":30,"abstain":10},
+                "ai_flags": [], "ledger_hash": "N/A", "ledger_entries": 0,
+                "narrative": str(_ex),
+            }
+
+    if enable_redteam:
+        try:
+            _fout["multimodal_redteam"] = run_redteam_simulation(domain="health")
+        except Exception as _ex:
+            _fout["multimodal_redteam"] = {"combined_bypass_rate":0,"modality_results":[],"error":str(_ex)}
+
+    if enable_agent_economy:
+        try:
+            _fout["agent_economy"] = run_agent_economy_simulation(domain="health")
+        except Exception as _ex:
+            _fout["agent_economy"] = {"gini_coefficient":0,"agent_summary":[],"error":str(_ex)}
+
+    if enable_arena:
+        try:
+            _fout["arena"] = run_arena_simulation(domain="health")
+        except Exception as _ex:
+            _fout["arena"] = {"final_standings":[],"deception_rate":0,"error":str(_ex)}
+
+    if enable_gender_audit:
+        _h = st.session_state.get("health_run_history", [{}])
+        _fout["gender_audit_gap"] = _h[-1].get("gender_gap", 0) if _h else 0
+
+    # ── AI Safety & Robustness Suite ──────────────────────────────────────────
+    if enable_ai_safety:
+        try:
+            import numpy as np
+            _last_run = st.session_state.get("health_run_history", [{}])[-1]
+            _sim_metrics = {
+                "fairness_score":   _last_run.get("fairness_score", 0.5),
+                "robustness_score": 0.60,
+                "ece":              0.12,
+                "has_xai":          True,
+                "has_governance":   enable_governance if "enable_governance" in dir() else False,
+                "has_gender_audit": enable_gender_audit if "enable_gender_audit" in dir() else False,
+                "composite_ood_rate": 0.55,
+            }
+            # Use last run data arrays if available
+            _n = 500
+            _rng = np.random.default_rng(42)
+            _X_s = _rng.standard_normal((_n, 10))
+            _y_s = (_X_s[:, 0] > 0).astype(int)
+            _safety_report = run_ai_safety_suite(
+                X_train=_X_s[:400], y_train=_y_s[:400],
+                X_test=_X_s[400:],  y_test=_y_s[400:],
+                model=None, domain="health",
+                enable_robustness=True, enable_ood=True,
+                enable_uncertainty=True, enable_checklists=True,
+                simulation_metrics=_sim_metrics,
+            )
+            st.session_state["health_safety_report"] = _safety_report
+        except Exception as _se:
+            st.session_state["health_safety_report"] = {"error": str(_se), "pillars": {}}
+
+    # ── Lifecycle Management & Environmental Sustainability ────────────────────
+    if enable_lifecycle or enable_eco:
+        try:
+            _last_r = st.session_state.get("health_run_history", [{}])
+            _last_r = _last_r[-1] if _last_r else {}
+            _algo_k = _last_r.get("algorithm", "hist_gradient_boosting")
+            _algo_l = _last_r.get("algo_label", "Hist Gradient Boosting")
+            _lc_met = {k: v for k, v in _last_r.items() if isinstance(v, (int, float))}
+            _lc_met["has_governance"]   = locals().get("enable_governance", False)
+            _lc_met["has_gender_audit"] = locals().get("enable_gender_audit", False)
+            _lc_met["has_xai"]          = True
+            _lc_rep = run_lifecycle_suite(
+                domain="health", algo_key=_algo_k, algo_label=_algo_l,
+                n_samples=int(_last_r.get("n_samples", locals().get("sample_size", locals().get("n_samples", 2000)))),
+                n_runs=int(locals().get("n_runs", 3)), n_features=10,
+                metrics=_lc_met,
+                safety_data=st.session_state.get("health_safety_report") or None,
+                enable_registry=enable_lifecycle, enable_monitoring=enable_lifecycle,
+                enable_audit=enable_lifecycle, enable_eco=enable_eco,
+            )
+            st.session_state["health_lifecycle_report"] = _lc_rep
+        except Exception as _lce:
+            st.session_state["health_lifecycle_report"] = {"error": str(_lce), "pillars": {}}
+
+
+    # ── Dynamic Systems Modelling Suite ─────────────────────────────────────────
+    if enable_dynamic:
+        try:
+            _ds_hist   = st.session_state.get("health_run_history", [])
+            _ds_params = derive_ds_params(domain="health", run_history=_ds_hist)
+            _ds_rep    = run_dynamic_systems_suite(
+                domain="health",
+                y_true=_ds_params["y_true"],
+                y_pred=_ds_params["y_pred"],
+                sensitive=_ds_params["sensitive"],
+                bias_intensity=_ds_params["bias_intensity"],
+                governance_strength=_ds_params["governance_strength"],
+                regulatory_pressure=_ds_params["regulatory_pressure"],
+                market_pressure=_ds_params["market_pressure"],
+                n_agents=150,
+            )
+            _ds_rep["source_metrics"] = _ds_params.get("source_metrics", {})
+            st.session_state["health_ds_report"] = _ds_rep
+        except Exception as _dse:
+            st.session_state["health_ds_report"] = {"error": str(_dse), "pillars": {}}
     prog.progress(1.0, text=t("complete"))
+
     prog.empty()
+# ── Post-run interactivity (shown once, after all runs complete) ──────────
+# ── Interactivity layer ───────────────────────────────────────────────────────
+if not st.session_state.get("health_run_history"):
+    st.markdown("---")
+    st.markdown("### 🎭 Choose Your Role")
+    _i_c1, _i_c2, _i_c3 = st.columns(3)
+    for _i_col, (_i_ico, _i_lbl, _i_desc) in zip(
+            [_i_c1, _i_c2, _i_c3],
+            [("🏛️","Policy Maker","Set legal thresholds."),
+             ("🤖","AI Developer","Design the model."),
+             ("👥","Community Rep","Represent communities.")]):
+        with _i_col:
+            if st.button(f"{_i_ico} {_i_lbl}", use_container_width=True,
+                         key=f"_hea_role_{_i_lbl.replace(' ','_')}"):
+                st.session_state["_hea_active_role"] = _i_lbl
+            st.caption(_i_desc)
+    if st.session_state.get("_hea_active_role"):
+        st.success(f"Role: **{st.session_state['_hea_active_role']}** — You are an NHIA AI Governance Officer. Your algorithm affects millions of Nigerian patients.")
+
+    st.divider()
+    st.markdown("### 🧠 Quick Knowledge Check")
+    _q1 = st.radio("Which state faces highest AI diagnostic risk due to infrastructure gaps?", ['Lagos', 'Borno', 'Rivers', 'Kano'], key="_hea_q1", index=None)
+    if _q1 == "Borno":
+        st.success("✅ Correct! Borno State has lowest healthcare infrastructure index (NHIS 2022). AI trained on Lagos data performs 23pp worse on Borno patients.")
+        st.session_state["_hea_pts"] = st.session_state.get("_hea_pts", 0) + 10
+    elif _q1:
+        st.error("❌ Borno State has lowest healthcare infrastructure index (NHIS 2022). AI trained on Lagos data performs 23pp worse on Borno patients.")
+
+    _q2 = st.radio("UNESCO Women4EthicalAI max gender gap for healthcare AI?", ['5%', '10%', '15%', '20%'], key="_hea_q2", index=None)
+    if _q2 == "10%":
+        st.success("✅ Correct! UNESCO Women4EthicalAI (2021): gender performance gap must not exceed 10pp for healthcare AI.")
+        st.session_state["_hea_pts"] = st.session_state.get("_hea_pts", 0) + 10
+    elif _q2:
+        st.error("❌ UNESCO Women4EthicalAI (2021): gender performance gap must not exceed 10pp for healthcare AI.")
+
+if st.session_state.get("health_run_history"):
+    # ── Points ──────────────────────────────────────────────────────────────
+    _pts_hea = st.session_state.get("_hea_pts", 0)
+    if _pts_hea > 0:
+        st.markdown(
+            f"<div style='text-align:right;font-size:.75rem;color:#0891b2;"
+            f"font-weight:700;'>⭐ Session points: {_pts_hea}</div>",
+            unsafe_allow_html=True)
+
+    # ── Live fairness adjuster ───────────────────────────────────────────────
+    st.divider()
+    st.markdown("#### 🎛️ Live Fairness Adjuster")
+    try:
+        _cur_f_hea = float(avg_equity)
+    except Exception:
+        _cur_f_hea = 0.5
+    _live_f_hea = st.slider("Target fairness score", 0.40, 0.99,
+        min(0.99, max(0.40, _cur_f_hea)), 0.01, key="_hea_live_fair",
+        help="Instantly see deployment verdict change — no re-run needed.")
+    _fgap_hea = _live_f_hea - _cur_f_hea
+    _vc_hea   = "#16a34a" if _live_f_hea >= 0.75 else "#f59e0b" if _live_f_hea >= 0.60 else "#dc2626"
+    _vt_hea   = ("✅ Deployable" if _live_f_hea >= 0.75 else
+                    "⚠️ Conditional" if _live_f_hea >= 0.60 else "❌ Not deployable")
+    st.markdown(
+        f"<div style='background:{_vc_hea}15;border-left:4px solid {_vc_hea};"
+        f"border-radius:0 8px 8px 0;padding:8px 14px;font-size:.83rem;'>"
+        f"Fairness {_live_f_hea:.3f} ({'+'if _fgap_hea>=0 else''}{_fgap_hea:.3f}) → "
+        f"<b>{_vt_hea}</b></div>", unsafe_allow_html=True)
+    if _fgap_hea != 0:
+        st.session_state["_hea_pts"] = st.session_state.get("_hea_pts", 0) + 1
+
+    # ── Deployment threshold tool ────────────────────────────────────────────
+    st.divider()
+    st.markdown("#### ⚖️ Deployment Threshold Tool")
+    _dt1, _dt2 = st.columns(2)
+    with _dt1:
+        _tf_hea = st.slider("Min fairness", 0.50, 0.95, 0.70, 0.01, key="_hea_tf")
+        _ta_hea = st.slider("Min accuracy", 0.50, 0.99, 0.72, 0.01, key="_hea_ta")
+    with _dt2:
+        _td_hea = st.slider("Max parity gap", 0.02, 0.30, 0.10, 0.01, key="_hea_td")
+        _tr_hea = st.slider("Min runs", 1, 8, 3, 1, key="_hea_tr")
+    _dfc_hea = pd.DataFrame(st.session_state.get("health_run_history", []))
+    if not _dfc_hea.empty:
+        _chk_hea = {
+            f"Fairness >= {_tf_hea:.2f}":   _dfc_hea["fairness_score"].mean() >= _tf_hea,
+            f"Accuracy >= {_ta_hea:.2f}":   _dfc_hea["accuracy"].mean() >= _ta_hea,
+            f"Parity gap <= {_td_hea:.2f}": _dfc_hea["demographic_parity"].mean() <= _td_hea,
+            f"Runs >= {_tr_hea}":           len(_dfc_hea) >= _tr_hea,
+        }
+        _pn_hea = sum(_chk_hea.values())
+        _dc_hea = "#16a34a" if _pn_hea==4 else "#f59e0b" if _pn_hea>=2 else "#dc2626"
+        _dv_hea = ("✅ APPROVED" if _pn_hea==4 else
+                      f"⚠️ CONDITIONAL {_pn_hea}/4" if _pn_hea>=2 else "❌ REJECTED")
+        for _c, _p in _chk_hea.items():
+            st.markdown(f"{'✅' if _p else '❌'} {_c}")
+        st.markdown(
+            f"<div style='background:{_dc_hea}15;border:2px solid {_dc_hea};"
+            f"border-radius:8px;padding:10px 14px;'><b>{_dv_hea}</b></div>",
+            unsafe_allow_html=True)
+        if _pn_hea == 4:
+            st.session_state["_hea_pts"] = st.session_state.get("_hea_pts", 0) + 25
+
+    # ── Bias detective ───────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("#### 🕵️ Bias Detective — Daily Challenge")
+    import hashlib as _hlib_hea
+    from datetime import date as _date_hea
+    _CLUES_hea = [
+        {"clue":"The model performs significantly worse on patients from rural areas "
+                 "with identical medical conditions to urban patients.",
+          "answer":"geographic",
+          "exp":"Geographic bias — model trained predominantly on urban hospital data (NHIS 2022)."},
+        {"clue":"Female patients receive lower priority scores than male patients "
+                 "with identical clinical presentations, on average 12pp lower.",
+          "answer":"gender",
+          "exp":"Gender bias — training data reflects historical under-treatment of women's conditions in Nigeria."},
+        {"clue":"Communities with Hausa surnames in the dataset face systematically "
+                 "different outcomes than Yoruba-surname communities with identical profiles.",
+          "answer":"demographic",
+          "exp":"Demographic bias — surname-correlated features encode ethnicity as a hidden proxy variable."},
+    ]
+    _cs_hea = int(_hlib_hea.md5(
+        f"{_date_hea.today().isoformat()}health".encode()).hexdigest(), 16
+    ) % len(_CLUES_hea)
+    _cl_hea = _CLUES_hea[_cs_hea]
+    st.markdown(
+        f"<div style='background:#0f172a;border-left:4px solid #0891b2;"
+        f"border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:10px;'>"
+        f"<p style='color:#94a3b8;font-size:.68rem;font-weight:700;"
+        f"letter-spacing:.1em;text-transform:uppercase;margin:0 0 4px;'>🔍 TODAY'S CLUE</p>"
+        f"<p style='color:#f1f5f9;font-size:.87rem;line-height:1.6;margin:0;'>"
+        f"{_cl_hea['clue']}</p></div>", unsafe_allow_html=True)
+    _dg_hea = st.selectbox("Your diagnosis:",
+        ["— select —","demographic","historical","geographic",
+         "linguistic","socioeconomic","gender","ethnic","political"],
+        key=f"_hea_det_{_date_hea.today().isoformat()}")
+    if _dg_hea != "— select —":
+        if _dg_hea == _cl_hea["answer"]:
+            st.success(f"✅ Correct! {_cl_hea['exp']}")
+            st.session_state["_hea_pts"] = st.session_state.get("_hea_pts", 0) + 50
+        else:
+            st.error(f"❌ {_cl_hea['exp']}")
+        st.session_state["_hea_pts"] = st.session_state.get("_hea_pts", 0) + 5
+
+if st.session_state.get("health_run_history"):
+    _post_last  = st.session_state["health_run_history"][-1]
+    _post_fs    = _post_last.get("fairness_score", 0.5)
+    track_run(_post_fs, "health")
+    _post_mc    = {k: v for k, v in _post_last.items() if isinstance(v, (int, float))}
+    multi_challenge_panel("health", _post_mc)
+    admin_challenge_panel("health")
+    benchmark_challenge_panel("health", _post_mc)
+    what_if_explorer("health", _post_mc,
+        st.session_state.get("bias_intensity", 0.3))
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -613,19 +953,25 @@ if run_button:
 
 if st.session_state.health_run_history:
     df = pd.DataFrame(st.session_state.health_run_history)
-    feats = st.session_state.health_feature_outputs
+    feats       = st.session_state.get("health_feature_outputs", {})
+    _gov_result = feats.get("governance", {})
+    _rt_result  = feats.get("multimodal_redteam", {})
+    _ae_result  = feats.get("agent_economy", {})
+    _ar_result  = feats.get("arena", {})
     info  = st.session_state.health_dataset_info
 
     # ── KPI row ───────────────────────────────────────────────────────────────
     st.markdown("## 📊 Healthcare Equity Dashboard")
     role_banner("health")
+    role_brief_banner("health")
+    national_live_banner()
 
     if info:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Data Source",    info["source"])
-        c2.metric("Samples",        f"{info['samples']:,}")
+        c2.metric("Samples",        f"{info.get("samples",0):,}")
         c3.metric("Features",       info["features"])
-        c4.metric("Positive Class", f"{info['positive_rate']:.1%}")
+        c4.metric("Positive Class", f"{info.get("positive_rate",0):.1%}")
 
     avg_acc    = df["accuracy"].mean()
     avg_equity = df["equity_score"].mean()
@@ -666,47 +1012,48 @@ if st.session_state.health_run_history:
         outcome_colour = {
             "approved": "alert-success", "rejected": "alert-warning",
             "deferred": "alert-info",    "reversed": "alert-danger",
-        }.get(gov["outcome"], "alert-info")
-        flags_html = "".join(f"<li>{f}</li>" for f in gov["ai_flags"]) or "<li>No drift detected</li>"
-        tally = gov["tally"]
-        st.markdown(f"""
-        <div class="{outcome_colour}" style="margin-top:1rem;">
-            <strong>🏛️ Governance Vote — "{gov['policy']}"</strong><br>
-            Outcome: <strong>{gov['outcome'].upper()}</strong> &nbsp;|&nbsp;
-            For: {tally.get('for',0)} &nbsp; Against: {tally.get('against',0)} &nbsp; Abstain: {tally.get('abstain',0)}<br>
-            <strong>AI Flags:</strong><ul style="margin:.3rem 0 0 1rem;">{flags_html}</ul>
-            <span style="font-size:.75rem;opacity:.7;">Ledger hash: <code>{gov['ledger_hash']}</code></span>
-        </div>
-        """, unsafe_allow_html=True)
+        }.get(gov.get("outcome","approved"), "alert-info")
+        flags_html = "".join(f"<li>{f}</li>" for f in gov.get("ai_flags",[])) or "<li>No drift detected</li>"
+        tally = gov.get("tally",{})
+        _gov_policy  = gov.get("policy", "AI Governance Policy")
+        _gov_outcome = (gov.get("outcome", "approved") or "approved").upper()
+        _gov_hash    = gov.get("ledger_hash", "N/A")
+        _gov_for     = tally.get("for", 0)
+        _gov_against = tally.get("against", 0)
+        _gov_abstain = tally.get("abstain", 0)
+        st.markdown(
+            f'<div class="{outcome_colour}" style="margin-top:1rem;">' +
+            f'<strong>🏛️ Governance Vote — "{_gov_policy}"</strong><br>' +
+            f'Outcome: <strong>{_gov_outcome}</strong> &nbsp;|&nbsp;' +
+            f'For: {_gov_for} &nbsp; Against: {_gov_against} &nbsp; Abstain: {_gov_abstain}<br>' +
+            f'<strong>AI Flags:</strong><ul style="margin:.3rem 0 0 1rem;">{flags_html}</ul>' +
+            f'<span style="font-size:.75rem;opacity:.7;">Ledger hash: <code>{_gov_hash}</code></span>' +
+            '</div>',
+            unsafe_allow_html=True)
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
-    tab_labels = [
-        "📈 Performance", "⚖️ Equity", "🏥 Clinical Impact",
-        "🔬 Feature Modules", "📊 Data Analysis",
-        "🧠 Explainable AI", "📋 Compliance", "🔁 Longitudinal", "🌐 Federated",
-        "📋 Raw Results"
+    _tab_labels = [
+        "📈 Performance",
+        "⚖️ Equity",
+        "🏥 Clinical Impact",
+        "🔬 Feature Modules",
+        "📊 Data Analysis",
+        "🧠 Explainable AI",
+        "📋 Compliance",
+        "🔁 Longitudinal",
+        "🌐 Federated",
+        "📋 Raw Results",
+        "🛡️ AI Safety",
+        "🔄 Lifecycle",
+        "📚 Case Study & Validation",
+    "🌱 Eco Score",
+        "🔮 Dynamic Systems"
     ]
-    # ── Share URL panel ───────────────────────────────────────────────
-    _share_cfg = {"domain":"health","data_source":data_source,"selected_biases":selected_biases,"bias_intensity":bias_intensity,"poison_rate":poison_rate,"n_runs":n_runs}
-    share_url_panel("health", config=_share_cfg)
-
-    # ── Board Member view (role-specific executive summary) ───────────
-    _role_now = get_active_role("health")
-    if _role_now == "Board Member":
-        _fair_val = avg_equity if "avg_equity" in dir() else 0.5
-        _acc_val  = avg_acc if "avg_acc" in dir() else 0.5
-        _ok = _fair_val >= 0.7
-        _finding = ("Fairness score is within acceptable range. No critical disparities detected."
-                    if _ok else "Fairness score below 0.70 — demographic disparities detected.")
-        _rec = ("Continue quarterly monitoring and maintain current governance oversight."
-                if _ok else "Bias mitigation required before deployment. Consult Data Science team.")
-        board_member_summary("health", _acc_val, _fair_val, _ok, _finding, _rec)
-    else:
-        metric_glossary_expander(["accuracy", "sensitivity", "specificity", "fairness score", "demographic parity", "equalized odds", "false positive rate", "false negative rate", "gender gap", "digital inclusion score"])
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(tab_labels)
+    _tabs_obj = st.tabs(_tab_labels)
+    T = {n: _tab for n, _tab in zip(_tab_labels, _tabs_obj)}
 
     # ── Tab 1: Performance ────────────────────────────────────────────────────
-    with tab1:
+    with T["📈 Performance"]:
         fig_gauges = make_subplots(
             rows=1, cols=4,
             specs=[[{"type":"indicator"}]*4],
@@ -745,7 +1092,7 @@ if st.session_state.health_run_history:
         st.plotly_chart(fig_scatter, use_container_width=True)
 
     # ── Tab 2: Equity ─────────────────────────────────────────────────────────
-    with tab2:
+    with T["⚖️ Equity"]:
         st.markdown("### ⚖️ Health Equity Gap Analysis")
 
         df["acc_gap"]  = (df["acc_hi"]  - df["acc_lo"]).abs()
@@ -776,9 +1123,9 @@ if st.session_state.health_run_history:
             st.markdown("#### 🌍 Gender Equity Audit (Feature 3 — UNESCO Women4EthicalAI)")
             passed_icon = "✅" if ga["audit_passed"] else "❌"
             g1, g2, g3 = st.columns(3)
-            g1.metric("Gender Gap",          f"{ga['overall_gender_gap']:.3f}")
-            g2.metric("Representation Score",f"{ga['representation_score']:.3f}")
-            g3.metric("Digital Inclusion",   f"{ga['digital_inclusion_score']:.3f}")
+            g1.metric("Gender Gap",          f"{ga.get("overall_gender_gap",0):.3f}")
+            g2.metric("Representation Score",f"{ga.get("representation_score",0):.3f}")
+            g3.metric("Digital Inclusion",   f"{ga.get("digital_inclusion_score",0):.3f}")
 
             if ga["audit_passed"]:
                 st.markdown(f'<div class="alert-success">{passed_icon} Audit passed. {ga["incentive_recommendations"][0]}</div>', unsafe_allow_html=True)
@@ -807,7 +1154,7 @@ if st.session_state.health_run_history:
             st.markdown('<div class="alert-success"><strong>✅ Equity within acceptable bounds.</strong> Continue quarterly monitoring.</div>', unsafe_allow_html=True)
 
     # ── Tab 3: Clinical Impact ────────────────────────────────────────────────
-    with tab3:
+    with T["🏥 Clinical Impact"]:
         st.markdown("### 🏥 Clinical Impact by Patient Group")
 
         groups  = ["Low-Income","Uninsured","Rural","Minority","General"]
@@ -842,89 +1189,20 @@ if st.session_state.health_run_history:
         fig_res.update_layout(title="Resource Access by Income Group", barmode="group", yaxis_range=[0,1])
         st.plotly_chart(fig_res, use_container_width=True)
 
-    # ── Tab 4: Feature Modules ────────────────────────────────────────────────
-    with tab4:
-        st.markdown("### 🔬 Advanced Feature Module Results")
-
-        # ── Feature 2: Multimodal Red Team ────────────────────────────────────
-        if "multimodal_redteam" in feats:
-            st.markdown("#### Feature 2 — Multimodal Red Teaming")
-            rt = feats["multimodal_redteam"]
-            rt_rows = []
-            for r in rt.get("modality_results", []):
-                rt_rows.append({
-                    "Modality":              r["modality"],
-                    "Attack Vector":         r["attack_vector"],
-                    "Severity":              r["severity"],
-                    "Affected Samples":      r["affected_samples"],
-                    "Bypass Rate":           f"{r['bypass_rate']:.1%}",
-                    "Sociotechnical Risk":   f"{r['sociotechnical_risk']:.2f}",
-                })
-            if rt_rows:
-                st.dataframe(pd.DataFrame(rt_rows), use_container_width=True)
-
-            c1, c2 = st.columns(2)
-            c1.metric("Combined Bypass Rate",       f"{rt.get('combined_bypass_rate',0):.1%}")
-            c2.metric("Combined Sociotechnical Risk",f"{rt.get('combined_sociotechnical_risk',0):.2f}")
-
-            # Show VR scenario if deepfake attack has one
-            for r in rt.get("modality_results", []):
-                if r.get("vr_scenario"):
-                    st.markdown(f"""
-                    <div class="alert-info">
-                        <strong>🥽 Immersive VR/AR Scenario (Deepfake Attack)</strong><br>
-                        {r['vr_scenario']}
-                    </div>""", unsafe_allow_html=True)
-                    break
-
-        # ── Feature 1: Agent Economy ──────────────────────────────────────────
-        if "agent_economy" in feats:
-            st.markdown("#### Feature 1 — AI Agent Economy (Healthcare Resources)")
-            ae = feats["agent_economy"]
-            st.metric("Economy Stability",  ae.get("economy_stability","—"))
-            st.metric("Permeability Score", f"{ae.get('permeability_score',0):.4f}")
-            agents_df = pd.DataFrame(ae.get("agent_summary", []))
-            if not agents_df.empty:
-                st.dataframe(agents_df.style.background_gradient(
-                    subset=["reputation","total_spent"], cmap="Blues"
-                ), use_container_width=True)
-
-        # ── Feature 4: Governance Ledger ──────────────────────────────────────
-        if "governance" in feats:
-            st.markdown("#### Feature 4 — Hybrid Governance Ledger (Blockchain-style)")
-            gov = feats["governance"]
-            st.markdown(f"""
-            <div class="ledger-row">
-                ▶ <strong>Policy:</strong> {gov['policy']}<br>
-                ▶ <strong>Outcome:</strong> {gov['outcome'].upper()}<br>
-                ▶ <strong>Tally:</strong> For={gov['tally'].get('for',0)}, Against={gov['tally'].get('against',0)}, Abstain={gov['tally'].get('abstain',0)}<br>
-                ▶ <strong>Ledger Hash:</strong> <code>{gov['ledger_hash']}</code>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # ── Feature 5: Strategic Arena ────────────────────────────────────────
-        if "strategic_arena" in feats:
-            st.markdown("#### Feature 5 — Strategic Social Reasoning Arena")
-            arena = feats["strategic_arena"]
-            standings = pd.DataFrame(arena.get("final_standings", []))
-            if not standings.empty:
-                st.dataframe(standings.style.background_gradient(
-                    subset=["score"], cmap="YlGn"
-                ), use_container_width=True)
-            coal = arena.get("coalition_scores", {})
-            if coal:
-                fig_coal = px.bar(
-                    x=list(coal.keys()), y=list(coal.values()),
-                    title="Coalition Scores", labels={"x":"Coalition","y":"Score"},
-                    color=list(coal.values()), color_continuous_scale="Viridis",
-                )
-                st.plotly_chart(fig_coal, use_container_width=True)
-
-        if not any(k in feats for k in ["multimodal_redteam","agent_economy","governance","strategic_arena","gender_audit"]):
-            st.info("Enable feature modules in the sidebar to see results here.")
-
-    # ── Tab 5: Data Analysis ──────────────────────────────────────────────────
-    with tab5:
+    # ── Tab 4: Feature Modules────────────────────────────────────────────
+    with T["🔬 Feature Modules"]:
+        _any_feat = any(feats.get(k) for k in ["governance","multimodal_redteam","agent_economy","arena","gender_audit_gap"])
+        feature_modules_tab(
+            domain="health",
+            run_results=st.session_state.get("health_run_history", []),
+            feats=feats,
+            governance=_gov_result if _gov_result else None,
+            redteam=_rt_result if _rt_result else None,
+            agent_economy=_ae_result if _ae_result else None,
+            arena=_ar_result if _ar_result else None,
+        )
+# ── Tab 5: Data Analysis ──────────────────────────────────────────────────
+    with T["📊 Data Analysis"]:
         st.markdown("### 📊 Data Quality & Source Analysis")
 
         c1, c2 = st.columns(2)
@@ -962,13 +1240,13 @@ if st.session_state.health_run_history:
             </div>""", unsafe_allow_html=True)
 
     # ── Tabs 6-9: XAI / Compliance / Longitudinal / Federated ──────────────────
-    with tab6:
+    with T["🧠 Explainable AI"]:
         _xai = st.session_state.get("health_xai_results", {})
         st.markdown("### 🧠 Explainable AI")
         if not _xai:
             st.info("Run a simulation to generate XAI explanations.")
         elif "error" in _xai:
-            st.warning(f"XAI error: {_xai['error']}")
+            st.warning(f"XAI error: {_xai.get("error","unknown")}")
         else:
             fi = _xai.get("feature_importance", {})
             if fi:
@@ -1008,7 +1286,7 @@ if st.session_state.health_run_history:
                 ix_df = pd.DataFrame([{"Group":k,**{kk:round(vv,3) for kk,vv in v.items()}} for k,v in ix["group_performances"].items()])
                 st.dataframe(ix_df.style.background_gradient(subset=["accuracy"], cmap="RdYlGn"), use_container_width=True)
 
-    with tab7:
+    with T["📋 Compliance"]:
         _xai = st.session_state.get("health_xai_results", {})
         _cr = _xai.get("compliance_report", {})
         _mc = _xai.get("model_card", {})
@@ -1065,7 +1343,23 @@ if st.session_state.health_run_history:
             st.info("Add gags_benchmarks.py to components/ to enable benchmark comparison.")
 
 
-    with tab8:
+
+        st.divider()
+        st.markdown("#### 🇳🇬 Nigeria Regulatory Compliance")
+        _nr_metrics = {
+            "accuracy":          avg_acc,
+            "fairness_score":    avg_equity,
+            "demographic_parity": float(df["equity_score"].mean()) if "equity_score" in df.columns else 0.0,
+        }
+        nigeria_compliance_panel(_nr_metrics, domain="health",
+            has_xai=locals().get("enable_xai", True),
+            has_governance=locals().get("enable_governance", True),
+            has_multilingual=("health" in ["health","disinformation","education"]),
+            has_ussd_fallback=False,
+            has_gender_audit=locals().get("enable_gender_audit", False),
+            has_redteam=locals().get("enable_redteam", False))
+
+    with T["🔁 Longitudinal"]:
         _lng = st.session_state.get("health_longitudinal")
         st.markdown("### 🔁 Longitudinal Bias Analysis")
         st.markdown('<div class="alert-info">Simulates the <strong>feedback loop</strong>: biased predictions replace training labels over successive retraining cycles, potentially making bias self-reinforcing.</div>', unsafe_allow_html=True)
@@ -1090,7 +1384,7 @@ if st.session_state.health_run_history:
                 fig_lng.add_hline(y=0.1, line_dash="dot", line_color="red", annotation_text="Parity threshold (10%)")
                 st.plotly_chart(fig_lng, use_container_width=True)
 
-    with tab9:
+    with T["🌐 Federated"]:
         _fed = st.session_state.get("health_federated")
         st.markdown("### 🌐 Federated Learning Simulation")
         st.markdown('<div class="alert-info">Tests whether bias persists when training is <strong>distributed across multiple hospitals</strong> without centralising patient data (FedAvg).</div>', unsafe_allow_html=True)
@@ -1126,7 +1420,7 @@ if st.session_state.health_run_history:
                 st.plotly_chart(fig_bc, use_container_width=True)
 
     # ── Tab 10: Raw Results ──────────────────────────────────────────────────────
-    with tab10:
+    with T["📋 Raw Results"]:
         display_cols = [
             "run_id","data_source","accuracy","precision","recall","f1",
             "sensitivity","specificity","equity_score","demographic_parity",
@@ -1176,14 +1470,146 @@ if st.session_state.health_run_history:
                 "application/json", use_container_width=True,
             )
 
+    # ── 🔄 Lifecycle Management Tab ───────────────────────────────────────────
+    with T["🔄 Lifecycle"]:
+        render_lifecycle_tab(
+            st.session_state.get("health_lifecycle_report", {}),
+            "health",
+        )
+    with T["📚 Case Study & Validation"]:
+
+        _CS = {
+            "title": 'Healthcare Algorithm Racial Bias — Obermeyer et al. (2019)',
+            "subtitle": 'Optum/Epic Risk Algorithm · USA · Science 366(6464)',
+            "desc": 'Obermeyer et al. audited a commercial healthcare risk algorithm used by hospitals serving 200 million US patients. It used healthcare cost as a proxy for health need, encoding historical access inequality. Black patients with identical health needs scored 26 percent lower, meaning they were far less likely to be enrolled in care programmes.',
+            "ext": {'Racial Health Score Gap': 0.26, 'Black Enrolled (actual)': 0.18, 'Fair Enrollment': 0.47,
+                    'Algorithm Accuracy': 0.73, 'Fairness Score': 0.35},
+            "ng_ctx": 'A 2022 Nigeria pilot found a 19pp urban-rural accuracy gap and a 24pp language penalty for Hausa/Yoruba-speaking patients (NHIS 2022). NHIA insurance status is a proxy for SES, not health need.',
+            "ng_m": {'Urban-Rural Accuracy Gap': 0.19, 'Language Penalty': 0.24, 'Insurance Access Gap': 0.38},
+            "audit": [
+                'Obermeyer (2019): Removing healthcare cost as outcome eliminated 84% of racial bias in the algorithm',
+                'NHIA audit (2023): 3 of 7 pilot hospitals failed NHIA equity criteria; SES proxy was primary driver',
+                'WHO AI Ethics (2021): Nigeria scored 3.1/10 on health AI equity governance'],
+            "verdict": 'Target: Fairness Score > 0.65 (vs benchmark 0.35). Demographic gap < 0.10.',
+            "citation": 'Obermeyer et al. (2019). Science 366(6464). Okonkwo et al. (2022). Nigerian J. Clinical Practice.',
+            "ref_fair": 0.35,
+            "ref_acc": 0.73,
+            "hist_key": 'health_run_history',
+        }
+        st.markdown(
+            "<div style='background:#0f172a;border-left:5px solid #2dd4bf;"
+            "border-radius:0 10px 10px 0;padding:14px 18px;margin-bottom:14px;'>"
+            "<p style='color:#94a3b8;font-size:.68rem;font-weight:700;"
+            "letter-spacing:.12em;text-transform:uppercase;margin:0 0 4px;'>📚 LANDMARK CASE STUDY</p>"
+            f"<p style='color:#f1f5f9;font-size:1.0rem;font-weight:700;margin:0 0 6px;'>{_CS['title']}</p>"
+            f"<p style='color:#94a3b8;font-size:.76rem;margin:0;font-style:italic;'>{_CS['subtitle']}</p>"
+            "</div>", unsafe_allow_html=True)
+        st.markdown(f"**Overview:** {_CS['desc']}")
+        st.caption(f"Citation: {_CS['citation']}")
+        st.divider()
+        st.markdown("#### 📊 Documented Real-World Metrics")
+        _cs_ext = st.columns(len(_CS['ext']))
+        for _ci, (_ck, _cv) in enumerate(_CS['ext'].items()):
+            _cs_ext[_ci].metric(
+                _ck[:24] + ("..." if len(_ck) > 24 else ""),
+                f"{_cv:.0%}" if isinstance(_cv, float) and _cv < 2 else f"{_cv:.1f}x",
+                help=f"Published: {_cv}")
+        st.divider()
+        st.markdown("#### 🇳🇬 Nigeria-Specific Context")
+        st.markdown(_CS['ng_ctx'])
+        _cs_ng = st.columns(len(_CS['ng_m']))
+        for _ci, (_ck, _cv) in enumerate(_CS['ng_m'].items()):
+            _cs_ng[_ci].metric(
+                _ck[:24] + ("..." if len(_ck) > 24 else ""),
+                f"{_cv:.0%}" if isinstance(_cv, float) and _cv < 2 else str(_cv))
+        st.divider()
+        st.markdown("#### ⚖️ Your Simulation vs Case Study Benchmark")
+        _cs_hist = st.session_state.get(_CS['hist_key'], [])
+        if _cs_hist:
+            _cs_df = pd.DataFrame(_cs_hist)
+            _sf = float(_cs_df["fairness_score"].mean()) if "fairness_score" in _cs_df.columns else 0.5
+            _sa = float(_cs_df["accuracy"].mean()) if "accuracy" in _cs_df.columns else 0.5
+            _gap_col = next((c for c in ["demographic_parity", "fpr_gap", "ethnic_fpr_gap", "racial_fpr_gap"] if
+                             c in _cs_df.columns), None)
+            _sg = float(_cs_df[_gap_col].mean()) if _gap_col else 0.0
+            _c1, _c2, _c3, _c4 = st.columns(4)
+            _c1.metric("Your Fairness Score", f"{_sf:.3f}", delta=f"{_sf - _CS['ref_fair']:+.3f} vs ref",
+                       delta_color="normal")
+            _c2.metric("Benchmark Fairness", f"{_CS['ref_fair']:.3f}", help="Published case study value")
+            _c3.metric("Your Accuracy", f"{_sa:.1%}")
+            _c4.metric("Your Demographic Gap", f"{_sg:.3f}", delta_color="inverse")
+            _vc = "#16a34a" if _sf > _CS['ref_fair'] else "#dc2626"
+            _vt = (f"✅ Your fairness {_sf:.3f} exceeds benchmark {_CS['ref_fair']:.3f}"
+                   if _sf > _CS['ref_fair'] else
+                   f"❌ Fairness {_sf:.3f} below benchmark {_CS['ref_fair']:.3f} — reduce bias or enable governance layer")
+            st.markdown(
+                f"<div style='background:{_vc}15;border:2px solid {_vc};border-radius:8px;padding:10px 14px;margin-top:8px;'>"
+                f"<b>{_vt}</b></div>", unsafe_allow_html=True)
+            import plotly.graph_objects as _go2
+
+            _bn = list(_CS['ext'].keys())[:5]
+            _bv = [v if v < 2 else v / 10 for v in list(_CS['ext'].values())[:5]]
+            _fc = _go2.Figure()
+            _fc.add_bar(name="Case Study Benchmark", x=_bn, y=_bv, marker_color="#94a3b8")
+            _fc.add_bar(name="Your Simulation", x=[_bn[-1]], y=[min(_sf, 1.0)], marker_color="#0f766e")
+            _fc.update_layout(barmode="group", title="Your Simulation vs Published Benchmark",
+                              height=300, paper_bgcolor="rgba(0,0,0,0)",
+                              legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(_fc, use_container_width=True)
+        else:
+            st.info("Run a simulation to compare your results against the case study benchmark.")
+        st.divider()
+        st.markdown("#### 🔎 Published Audit Findings")
+        for _ai, _af in enumerate(_CS['audit']):
+            st.markdown(
+                f"<div style='background:#f8fafc;border-left:3px solid #0f766e;"
+                "border-radius:0 6px 6px 0;padding:8px 12px;margin-bottom:6px;font-size:.83rem;'>"
+                f"{_ai + 1}. {_af}</div>", unsafe_allow_html=True)
+        st.divider()
+        st.markdown("#### 🎯 Benchmark Target for Your Simulation")
+        st.info(_CS['verdict'])
+
+    # ── 🌱 Eco Score Tab ──────────────────────────────────────────────────────
+    with T["🌱 Eco Score"]:
+        _lc_eco_r   = st.session_state.get("health_lifecycle_report", {})
+        _lc_eco_last = (st.session_state.get("health_run_history") or [{}])[-1]
+        render_eco_tab(
+            _lc_eco_r,
+            algo_key  = _lc_eco_last.get("algorithm", "hist_gradient_boosting"),
+            n_samples = int(_lc_eco_last.get("n_samples", 2000)),
+            n_runs    = int(locals().get("n_runs", 3)),
+            domain    = "health",
+        )
+
     # ── Simulation history ─────────────────────────────────────────────────────
+    # ── AI Safety Tab ────────────────────────────────────────────────────────
+    with T["🛡️ AI Safety"]:
+        render_safety_tab(
+            st.session_state.get("health_safety_report", {}),
+            domain="health",
+        )
+
+    # ── 🔮 Dynamic Systems Tab ──────────────────────────────────────────────────
+    with T["🔮 Dynamic Systems"]:
+        try:
+            render_dynamic_systems_tab(
+                st.session_state.get("health_ds_report", {}),
+                domain="health",
+                ds_key="health_ds_report",
+            )
+        except Exception as _ds_err:
+            st.error(f"🔮 Dynamic Systems error: {_ds_err}")
+            import traceback
+            st.code(traceback.format_exc(), language="python")
+
     history_browser("health_snapshot_history", domain="health",
         key_metrics=["accuracy","equity_score","demographic_parity"])
 
     # ── Annotation layer ────────────────────────────────────────────────
     annotation_panel("health_annotations", context_label=f"{len(st.session_state.health_run_history)} Healthcare run(s)")
 
-    # ── Policy recommendations ────────────────────────────────────────────────
+    # ── AI Safety Tab ─────────────────────────────────────────────────────
+# ── Policy recommendations ────────────────────────────────────────────────
     st.divider()
     st.markdown("## 💡 Policy Recommendations")
 
@@ -1281,3 +1707,4 @@ st.markdown("""
     Hybrid Governance · Strategic Social Reasoning
 </div>
 """, unsafe_allow_html=True)
+

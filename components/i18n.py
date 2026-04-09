@@ -755,7 +755,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     # Health scenario labels
     "scenario_nhia":         {"en":"NHIA Insurance Enrolment AI","ha":"Shigar da AI na NHIA","yo":"AI Ìforúkọsílẹ̀ NHIA","ig":"AI Ndebanye NHIA"},
     "scenario_oop":          {"en":"Hospital OOP Triage AI","ha":"AI Triage na Asibiti","yo":"AI Triage Àsìlù","ig":"AI Triage Ụlọ Ọgwụ"},
-    "scenario_maternal":     {"en":"Maternal Health AI — FCT","ha":"AI Lafiyar Uwa — FCT","yo":"AI Ìlera Ìyá — FCT","ig":"AI Ahụike Nwunye — FCT"},
+    "scenario_maternal":     {"en":"Maternal Health AI — Nigeria","ha":"AI Lafiyar Uwa — Nigeria","yo":"AI Ìlera Ìyá — Nigeria","ig":"AI Ahụike Nwunye — Nigeria"},
     "scenario_workforce":    {"en":"Health Workforce Allocation AI","ha":"AI Rarrabawa Masu Kiwon Lafiya","yo":"AI Ìpín Òṣìṣẹ́ Ìlera","ig":"AI Nkewa Ndị Ọrụ Ahụike"},
     "scenario_pharma":       {"en":"Pharmaceutical Access AI","ha":"AI Damar Magunguna","yo":"AI Ìráwọ Oogun","ig":"AI Nnweta Ọgwụ"},
     "scenario_devaid":       {"en":"Social Investment Targeting AI","ha":"AI Niyya na Saka Hannun Jari","yo":"AI Ìfọkànsí Ìdókówò Àwùjọ","ig":"AI Ntinye Ego Mmekọ"},

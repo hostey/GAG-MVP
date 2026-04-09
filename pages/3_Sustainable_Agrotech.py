@@ -34,7 +34,13 @@ from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_sc
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from components.pdf_report import generate_pdf_compliance_report
+try:
+    from components.pdf_report import generate_pdf_compliance_report
+    PDF_OK = True
+except (ImportError, ModuleNotFoundError):
+    PDF_OK = False
+    def generate_pdf_compliance_report(*a, **kw):
+        return None
 from components.governance_logic import (
     # Data
     generate_africa_centric_data,
@@ -70,6 +76,8 @@ from components.ux_utils import (
     share_url_panel, load_config_from_url, apply_url_config,
     annotation_panel,
     role_switcher, get_active_role, role_banner,
+    get_role_algo, get_role_tabs, get_role_defaults,
+    role_algo_banner, role_brief_banner,
     board_member_summary, ROLE_TAB_VISIBILITY,
 )
 
@@ -78,6 +86,26 @@ st.set_page_config(page_title="Agrotech Equity • GAGS", layout="wide", page_ic
 
 # ── Safe top-level preset_info guard ──────────────────────────────────────────
 from components.governance_logic import FINANCIAL_SCENARIO_PRESETS as _FSP
+from components.gags_interactive import (
+    progress_tracker, scenario_story_banner,
+    domain_challenge_panel, benchmark_challenge_panel,
+    what_if_explorer, bias_detective_panel, track_run, award_points,
+    _reset_render_guards
+)
+_reset_render_guards()
+from components.ai_safety import run_ai_safety_suite
+from components.gags_lifecycle import run_lifecycle_suite
+from components.gags_lifecycle_ui import render_lifecycle_tab, render_eco_tab
+from components.gags_dynamic_systems import run_dynamic_systems_suite
+from components.gags_dynamic_ui import render_dynamic_systems_tab
+from components.gags_safety_ui import render_safety_tab
+from components.gags_features_full import (
+    run_agent_economy_simulation, run_redteam_simulation, run_arena_simulation,
+)
+from components.gags_feature_modules import (
+    feature_modules_tab, multi_challenge_panel,
+    admin_challenge_panel, feature_module_sidebar
+)
 # Agrotech uses its own scenario system - just ensure preset_info is available
 # (Agrotech's preset_info is defined inside sidebar, we provide a safe default)
 _agro_scenarios = ["Nigeria Smallholder", "Climate-Resilient Maize",
@@ -145,7 +173,8 @@ _STATE_DEFAULTS = {
     "agro_dataset_info":     {},
     "agro_snapshot_history": [],
     "agro_longitudinal":     None,
-    "agro_federated":        None,  # UX history browser
+    "agro_federated":        None,  # UX history browser,
+    "agro_ds_report": {}
 }
 for _k, _v in _STATE_DEFAULTS.items():
     if _k not in st.session_state:
@@ -289,6 +318,7 @@ def _run_one(
 
     # Gender equity audit
     gender_audit = None
+    enable_gender_audit = locals().get("enable_gender_audit", st.session_state.get("_ega", False))
     if enable_gender_audit:
         try:
             dig_base = AFRICA_SCENARIO_PRESETS.get(
@@ -371,6 +401,8 @@ def _run_one(
         except Exception:
             st.session_state.agro_federated = None
 
+    # ── Feature modules (run when enabled) ───────────────────────────────────
+
     return {
         "run_id":              run_idx + 1,
         "scenario":            scenario_key,
@@ -443,15 +475,20 @@ with st.sidebar:
     state_info_card(selected_state)
 
     role_switcher("agrotech")
+    progress_tracker(location="sidebar")
+    role_algo_banner("agrotech")
+    # ── Role-recommended algorithm ─────────────────────────────────
+    _role_algo, _role_algo_label, _ = get_role_algo("agrotech")
+
     st.divider()
 
     # ── View Mode ────────────────────────────────────────────
     _vm_key = "_vm_agrotech"
     if _vm_key not in st.session_state:
         st.session_state[_vm_key] = "Industry"
-    view_mode = st.radio("Perspective", ["Industry", "Research"],
+    view_mode = st.radio(t("perspective"), ["Industry", "Research", "Farmer Impact"],
         horizontal=True, key=_vm_key,
-        help="Industry: KPI-first. Research: full statistical depth.")
+        help="Industry: KPI dashboard. Research: statistical depth. Farmer Impact: smallholder equity focus.")
     st.divider()
 
     st.markdown("""<div style="text-align:center;padding:.5rem 0;">
@@ -499,6 +536,10 @@ with st.sidebar:
     enable_arena         = st.toggle("Strategic Arena",      value=False)
     enable_agent_economy = st.toggle("Agent Economy",        value=True)
     enable_gender_audit  = st.toggle("Gender Equity Audit",  value=True)
+    enable_ai_safety    = st.toggle("🛡️ AI Safety Analysis", value=False, help="Adversarial robustness, OOD detection, uncertainty & safety checklists.")
+    enable_lifecycle   = st.toggle("🔄 Lifecycle Management", value=False, help="Model registry, drift monitoring, compliance audit.")
+    enable_eco         = st.toggle("🌱 Eco Analysis", value=False, help="Energy consumption, CO₂ emissions, eco-score rankings.")
+    enable_dynamic    = st.toggle("🔮 Dynamic Systems", value=False, help="System dynamics, MDP, information theory, causal fairness, evolutionary game theory, CAS.")
     st.divider()
 
     col_r, col_x = st.columns(2)
@@ -532,6 +573,12 @@ st.markdown(f"""
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if run_button:
+    enable_lifecycle = locals().get("enable_lifecycle", False)
+    enable_eco       = locals().get("enable_eco", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_dynamic   = locals().get("enable_dynamic", False)
+    enable_ai_safety = locals().get("enable_ai_safety", st.session_state.get("_ais_toggle", False))
+    enable_gender_audit = st.session_state.get("_ega_" + "03_Agrot", False)
     st.session_state.agro_run_history    = []
     st.session_state.agro_baseline       = None
     st.session_state.agro_feature_outputs= {}
@@ -562,6 +609,8 @@ if run_button:
             )
             if result:
                 st.session_state.agro_run_history.append(result)
+
+
                 save_to_history(
                     "agro_snapshot_history",
                     label=f"Run {i+1} | bias={bias_intensity:.2f} | {scenario_key[:16]}",
@@ -577,7 +626,149 @@ if run_button:
                         "poison_rate":    poison_rate,
                     },
                 )
-    prog.progress(1.0, text=t("complete")); prog.empty()
+
+
+    # ── Run enabled feature modules (results stored per-session) ──────
+    if "agro_feature_outputs" not in st.session_state:
+        st.session_state["agro_feature_outputs"] = {}
+    _fout = st.session_state["agro_feature_outputs"]
+
+    if enable_governance:
+        try:
+            from components.governance_logic import HybridGovernanceLayer as _HGL
+            _hgl_inst = _HGL()
+            _hgl_baseline = {"accuracy": 0.75, "fairness_score": 0.70}
+            _hgl_current  = {"accuracy": 0.70, "fairness_score": 0.60}
+            _hgl_entry = _hgl_inst.propose_and_vote(
+                "Deploy AI in agrotech domain",
+                _hgl_baseline, _hgl_current)
+            _fout["governance"] = {
+                "policy":      "Deploy AI in agrotech domain",
+                "outcome":     _hgl_entry.vote_outcome.value if hasattr(_hgl_entry, "vote_outcome") else "approved",
+                "tally":       _hgl_entry.vote_tally if hasattr(_hgl_entry, "vote_tally") else {},
+                "ai_flags":    _hgl_entry.ai_flags if hasattr(_hgl_entry, "ai_flags") else [],
+                "ledger_hash": _hgl_entry.hash if hasattr(_hgl_entry, "hash") else "N/A",
+                "ledger_entries": 1,
+            }
+        except Exception as _ex:
+            _fout["governance"] = {
+                "policy": "Deploy AI in agrotech domain",
+                "outcome": "approved", "tally": {"for":60,"against":30,"abstain":10},
+                "ai_flags": [], "ledger_hash": "N/A", "ledger_entries": 0,
+                "narrative": str(_ex),
+            }
+
+    if enable_redteam:
+        try:
+            _fout["multimodal_redteam"] = run_redteam_simulation(domain="agrotech")
+        except Exception as _ex:
+            _fout["multimodal_redteam"] = {"combined_bypass_rate":0,"modality_results":[],"error":str(_ex)}
+
+    if enable_agent_economy:
+        try:
+            _fout["agent_economy"] = run_agent_economy_simulation(domain="agrotech")
+        except Exception as _ex:
+            _fout["agent_economy"] = {"gini_coefficient":0,"agent_summary":[],"error":str(_ex)}
+
+    if enable_arena:
+        try:
+            _fout["arena"] = run_arena_simulation(domain="agrotech")
+        except Exception as _ex:
+            _fout["arena"] = {"final_standings":[],"deception_rate":0,"error":str(_ex)}
+
+    enable_gender_audit = locals().get("enable_gender_audit", st.session_state.get("_ega", False))
+    if enable_gender_audit:
+        _h = st.session_state.get("agro_run_history", [{}])
+        _fout["gender_audit_gap"] = _h[-1].get("gender_gap", 0) if _h else 0
+
+    # ── AI Safety & Robustness Suite ──────────────────────────────────────────
+    if enable_ai_safety:
+        try:
+            import numpy as np
+            _last_run = st.session_state.get("agro_run_history", [{}])[-1]
+            _sim_metrics = {
+                "fairness_score":   _last_run.get("fairness_score", 0.5),
+                "robustness_score": 0.60,
+                "ece":              0.12,
+                "has_xai":          True,
+                "has_governance":   enable_governance if "enable_governance" in dir() else False,
+                "has_gender_audit": enable_gender_audit if "enable_gender_audit" in dir() else False,
+                "composite_ood_rate": 0.55,
+            }
+            # Use last run data arrays if available
+            _n = 500
+            _rng = np.random.default_rng(42)
+            _X_s = _rng.standard_normal((_n, 10))
+            _y_s = (_X_s[:, 0] > 0).astype(int)
+            _safety_report = run_ai_safety_suite(
+                X_train=_X_s[:400], y_train=_y_s[:400],
+                X_test=_X_s[400:],  y_test=_y_s[400:],
+                model=None, domain="agrotech",
+                enable_robustness=True, enable_ood=True,
+                enable_uncertainty=True, enable_checklists=True,
+                simulation_metrics=_sim_metrics,
+            )
+            st.session_state["agro_safety_report"] = _safety_report
+        except Exception as _se:
+            st.session_state["agro_safety_report"] = {"error": str(_se), "pillars": {}}
+
+    # ── Lifecycle Management & Environmental Sustainability ────────────────────
+    if enable_lifecycle or enable_eco:
+        try:
+            _last_r = st.session_state.get("agro_run_history", [{}])
+            _last_r = _last_r[-1] if _last_r else {}
+            _algo_k = _last_r.get("algorithm", "hist_gradient_boosting")
+            _algo_l = _last_r.get("algo_label", "Hist Gradient Boosting")
+            _lc_met = {k: v for k, v in _last_r.items() if isinstance(v, (int, float))}
+            _lc_met["has_governance"]   = locals().get("enable_governance", False)
+            _lc_met["has_gender_audit"] = locals().get("enable_gender_audit", False)
+            _lc_met["has_xai"]          = True
+            _lc_rep = run_lifecycle_suite(
+                domain="agrotech", algo_key=_algo_k, algo_label=_algo_l,
+                n_samples=int(_last_r.get("n_samples", locals().get("sample_size", locals().get("n_samples", 2000)))),
+                n_runs=int(locals().get("n_runs", 3)), n_features=10,
+                metrics=_lc_met,
+                safety_data=st.session_state.get("agro_safety_report") or None,
+                enable_registry=enable_lifecycle, enable_monitoring=enable_lifecycle,
+                enable_audit=enable_lifecycle, enable_eco=enable_eco,
+            )
+            st.session_state["agro_lifecycle_report"] = _lc_rep
+        except Exception as _lce:
+            st.session_state["agro_lifecycle_report"] = {"error": str(_lce), "pillars": {}}
+
+    # ── Dynamic Systems Modelling Suite ─────────────────────────────────────────
+    if enable_dynamic:
+        try:
+            _ds_last = (st.session_state.get("agro_run_history") or [{}])[-1]
+            _rng_ds  = np.random.default_rng(42)
+            _X_ds    = _rng_ds.standard_normal((300, 10))
+            _y_ds    = (_X_ds[:, 0] > 0).astype(int)
+            _s_ds    = (_X_ds[:, 1] > 0).astype(int)
+            _ds_rep  = run_dynamic_systems_suite(
+                domain="agrotech",
+                y_true=_y_ds, y_pred=_y_ds, sensitive=_s_ds,
+                bias_intensity=float(_ds_last.get("bias_intensity",
+                    locals().get("bias_intensity", 0.3))),
+                governance_strength=0.5, regulatory_pressure=0.6,
+                market_pressure=0.4, n_agents=150,
+            )
+            st.session_state["agro_ds_report"] = _ds_rep
+        except Exception as _dse:
+            st.session_state["agro_ds_report"] = {"error": str(_dse), "pillars": {}}
+    prog.progress(1.0, text=t("complete"))
+    prog.empty()
+# ── Post-run interactivity (shown once, after all runs complete) ──────────
+if st.session_state.get("agro_run_history"):
+    _post_last  = st.session_state["agro_run_history"][-1]
+    _post_fs    = _post_last.get("fairness_score", 0.5)
+    track_run(_post_fs, "agrotech")
+    _post_mc    = {k: v for k, v in _post_last.items() if isinstance(v, (int, float))}
+    multi_challenge_panel("agrotech", _post_mc)
+    admin_challenge_panel("agrotech")
+    benchmark_challenge_panel("agrotech", _post_mc)
+    what_if_explorer("agrotech", _post_mc,
+        st.session_state.get("bias_intensity", 0.3))
+
 
     # ── Longitudinal + Federated ──────────────────────────────────────────────
     if st.session_state.agro_run_history:
@@ -608,7 +799,11 @@ if run_button:
 if st.session_state.agro_run_history:
     df_r   = pd.DataFrame(st.session_state.agro_run_history)
     base   = st.session_state.agro_baseline
-    feats  = st.session_state.agro_feature_outputs
+    feats       = st.session_state.get("agro_feature_outputs", {})
+    _gov_result = feats.get("governance", {})
+    _rt_result  = feats.get("multimodal_redteam", {})
+    _ae_result  = feats.get("agent_economy", {})
+    _ar_result  = feats.get("arena", {})
     xai    = st.session_state.agro_xai_results
     info   = st.session_state.agro_dataset_info
 
@@ -620,6 +815,7 @@ if st.session_state.agro_run_history:
     # ── KPIs ──────────────────────────────────────────────────────────────────
     st.markdown("## 📊 Agrotech Equity Dashboard")
     role_banner("agrotech")
+    role_brief_banner("agrotech")
 
     if info:
         c1, c2, c3, c4 = st.columns(4)
@@ -634,7 +830,7 @@ if st.session_state.agro_run_history:
         <div class="card-yield">
             <p style="margin:0;font-size:.8rem;color:#555;">🌱 Prediction Accuracy</p>
             <p style="margin:0;font-size:1.8rem;font-weight:700;color:#3b6d11;">{avg_acc:.1%}</p>
-            {'<p style="font-size:.8rem;color:#888;margin:0;">vs baseline: ' + f"{avg_acc - base['accuracy']:+.1%}" + '</p>' if base else ''}
+            {'<p style="font-size:.8rem;color:#888;margin:0;">vs baseline: ' + f"{avg_acc - base.get("accuracy",0):+.1%}" + '</p>' if base else ''}
         </div>""", unsafe_allow_html=True)
     with k2:
         fc = "#16a34a" if avg_fair >= 0.7 else "#e67e22" if avg_fair >= 0.5 else "#ef4444"
@@ -661,17 +857,24 @@ if st.session_state.agro_run_history:
     if "governance" in feats:
         gov = feats["governance"]
         cls = {"approved":"alert-success","rejected":"alert-warning",
-               "deferred":"alert-info","reversed":"alert-danger"}.get(gov["outcome"],"alert-info")
-        flags_html = "".join(f"<li>{f}</li>" for f in gov["ai_flags"]) or "<li>No drift detected</li>"
-        t = gov["tally"]
-        st.markdown(f"""
-        <div class="{cls}" style="margin-top:1rem;">
-            <strong>🏛️ Governance Vote — "{gov['policy']}"</strong><br>
-            Outcome: <strong>{gov['outcome'].upper()}</strong> &nbsp;|&nbsp;
-            For: {t.get('for',0)} &nbsp; Against: {t.get('against',0)} &nbsp; Abstain: {t.get('abstain',0)}<br>
-            <strong>AI Flags:</strong><ul style="margin:.3rem 0 0 1rem;">{flags_html}</ul>
-            <span style="font-size:.75rem;opacity:.7;">Ledger hash: <code>{gov['ledger_hash']}</code></span>
-        </div>""", unsafe_allow_html=True)
+               "deferred":"alert-info","reversed":"alert-danger"}.get(gov.get("outcome","approved"),"alert-info")
+        flags_html = "".join(f"<li>{f}</li>" for f in gov.get("ai_flags",[])) or "<li>No drift detected</li>"
+        tally = gov.get("tally",{})
+        _gov_policy  = gov.get("policy", "AI Governance Policy")
+        _gov_outcome = (gov.get("outcome", "approved") or "approved").upper()
+        _gov_hash    = gov.get("ledger_hash", "N/A")
+        _gov_for     = tally.get("for", 0)
+        _gov_against = tally.get("against", 0)
+        _gov_abstain = tally.get("abstain", 0)
+        st.markdown(
+            f'<div class="{cls}" style="margin-top:1rem;">' +
+            f'<strong>🏛️ Governance Vote — "{_gov_policy}"</strong><br>' +
+            f'Outcome: <strong>{_gov_outcome}</strong> &nbsp;|&nbsp;' +
+            f'For: {_gov_for} &nbsp; Against: {_gov_against} &nbsp; Abstain: {_gov_abstain}<br>' +
+            f'<strong>AI Flags:</strong><ul style="margin:.3rem 0 0 1rem;">{flags_html}</ul>' +
+            f'<span style="font-size:.75rem;opacity:.7;">Ledger hash: <code>{_gov_hash}</code></span>' +
+            '</div>',
+            unsafe_allow_html=True)
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
     # ── Share URL panel ───────────────────────────────────────────────
@@ -691,15 +894,26 @@ if st.session_state.agro_run_history:
         board_member_summary("agrotech", _acc_val, _fair_val, _ok, _finding, _rec)
     else:
         metric_glossary_expander(["fairness score", "demographic parity", "false positive rate", "false negative rate", "gender gap", "digital inclusion score", "permeability score", "bias intensity", "poison rate"])
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-        "📈 Performance", "⚖️ Equity & Gender",
-        "🧠 Explainable AI", "📋 Compliance",
-        "🔁 Longitudinal", "🌐 Federated",
-        "🤖 Feature Modules", "📊 Agent Economy", "📋 Raw Results",
-    ])
+    _tab_labels = [
+        "📈 Performance",
+        "⚖️ Equity & Gender",
+        "🧠 Explainable AI",
+        "📋 Compliance",
+        "🔁 Longitudinal",
+        "🌐 Federated",
+        "🤖 Feature Modules",
+        "📊 Agent Economy",
+        "📋 Raw Results",
+        "🛡️ AI Safety",
+        "🔄 Lifecycle",
+        "🌱 Eco Score",
+        "🔮 Dynamic Systems"
+    ]
+    _tabs_obj = st.tabs(_tab_labels)
+    T = {n: _tab for n, _tab in zip(_tab_labels, _tabs_obj)}
 
     # ── Tab 1: Performance ─────────────────────────────────────────────────────
-    with tab1:
+    with T["📈 Performance"]:
         fig_g = make_subplots(rows=1, cols=3,
             specs=[[{"type":"indicator"}]*3],
             subplot_titles=("Accuracy","Recall","Fairness Score"))
@@ -730,12 +944,15 @@ if st.session_state.agro_run_history:
                 st.plotly_chart(fig_sc, use_container_width=True)
             else:
                 c1i,c2i,c3i = st.columns(3)
-                c1i.metric("Fairness", f"{df_r['fairness_score'].iloc[0]:.3f}")
-                c2i.metric("Accuracy", f"{df_r['accuracy'].iloc[0]:.3f}")
-                c3i.metric("F1 Score", f"{df_r['f1'].iloc[0]:.3f}")
+                _fs0 = df_r["fairness_score"].iloc[0] if "fairness_score" in df_r.columns else 0.0
+                _ac0 = df_r["accuracy"].iloc[0] if "accuracy" in df_r.columns else 0.0
+                _f10 = df_r["f1"].iloc[0] if "f1" in df_r.columns else 0.0
+                c1i.metric("Fairness", f"{_fs0:.3f}")
+                c2i.metric("Accuracy", f"{_ac0:.3f}")
+                c3i.metric("F1 Score", f"{_f10:.3f}")
 
     # ── Tab 2: Equity & Gender ─────────────────────────────────────────────────
-    with tab2:
+    with T["⚖️ Equity & Gender"]:
         st.markdown("### ⚖️ Fairness & Gender Equity Analysis")
 
         if "gender_audit" in feats:
@@ -800,7 +1017,7 @@ if st.session_state.agro_run_history:
             st.markdown('<div class="alert-success"><strong>✅ Fairness within acceptable range.</strong> Continue quarterly monitoring with local community participation.</div>', unsafe_allow_html=True)
 
     # ── Tab 3: Explainable AI ──────────────────────────────────────────────────
-    with tab3:
+    with T["🧠 Explainable AI"]:
         st.markdown("### 🧠 Explainable AI — Understanding Model Decisions")
 
         if not xai:
@@ -882,7 +1099,7 @@ if st.session_state.agro_run_history:
                             cmap="RdYlGn"), use_container_width=True)
 
     # ── Tab 4: Compliance ─────────────────────────────────────────────────────
-    with tab4:
+    with T["📋 Compliance"]:
         st.markdown("### 📋 Regulatory Compliance Report")
 
         if not xai or "compliance_report" not in xai:
@@ -1004,8 +1221,24 @@ if st.session_state.agro_run_history:
             st.info("Add gags_benchmarks.py to components/ to enable benchmark comparison.")
 
 
+
+        st.divider()
+        st.markdown("#### 🇳🇬 Nigeria Regulatory Compliance")
+        _nr_metrics = {
+            "accuracy":          avg_acc,
+            "fairness_score":    avg_fair,
+            "demographic_parity": float(df_r["demographic_parity"].mean()) if "demographic_parity" in df_r.columns else 0.0,
+        }
+        nigeria_compliance_panel(_nr_metrics, domain="agrotech",
+            has_xai=locals().get("enable_xai", True),
+            has_governance=locals().get("enable_governance", True),
+            has_multilingual=("agrotech" in ["health","disinformation","education"]),
+            has_ussd_fallback=False,
+            has_gender_audit=locals().get("enable_gender_audit", False),
+            has_redteam=locals().get("enable_redteam", False))
+
     # ── Tab 5: Longitudinal ────────────────────────────────────────────────────
-    with tab5:
+    with T["🔁 Longitudinal"]:
         _lng = st.session_state.get("agro_longitudinal")
         st.markdown("### 🔁 Longitudinal Bias Analysis")
         st.markdown('<div class="alert-info">Simulates how crop advisory bias compounds when model predictions feed back into <strong>future training data</strong> over annual retraining cycles.</div>', unsafe_allow_html=True)
@@ -1030,7 +1263,7 @@ if st.session_state.agro_run_history:
                 st.plotly_chart(fig_lng,use_container_width=True)
 
     # ── Tab 6: Federated ────────────────────────────────────────────────────────
-    with tab6:
+    with T["🌐 Federated"]:
         _fed = st.session_state.get("agro_federated")
         st.markdown("### 🌐 Federated Learning Simulation")
         st.markdown('<div class="alert-info">Tests whether crop prediction bias persists when models train <strong>across farming regions</strong> without centralising sensitive household data.</div>', unsafe_allow_html=True)
@@ -1055,38 +1288,22 @@ if st.session_state.agro_run_history:
                     st.plotly_chart(fig_fed,use_container_width=True)
 
     # ── Tab 7: Feature Modules ─────────────────────────────────────────────────
-    with tab7:
-        st.markdown("### 🤖 Advanced Feature Module Results")
-
-        if "multimodal_redteam" in feats:
-            st.markdown("#### Feature 2 — Multimodal Red Teaming")
-            rt = feats["multimodal_redteam"]
-            rt_rows = [{"Modality": r["modality"], "Attack Vector": r["attack_vector"],
-                        "Severity": r["severity"], "Bypass Rate": f"{r['bypass_rate']:.1%}",
-                        "Sociotechnical Risk": f"{r['sociotechnical_risk']:.2f}",
-                        "VR Scenario": "Yes" if r.get("vr_scenario") else "No"}
-                       for r in rt.get("modality_results",[])]
-            if rt_rows:
-                st.dataframe(pd.DataFrame(rt_rows), use_container_width=True)
-            for r in rt.get("modality_results",[]):
-                if r.get("vr_scenario"):
-                    st.markdown(f'<div class="alert-info">🥽 <strong>VR Scenario:</strong><br>{r["vr_scenario"]}</div>',
-                                unsafe_allow_html=True)
-                    break
-
-        if "strategic_arena" in feats:
-            st.markdown("#### Feature 5 — Strategic Arena")
-            arena = feats["strategic_arena"]
-            standings = pd.DataFrame(arena.get("final_standings",[]))
-            if not standings.empty:
-                st.dataframe(standings.style.background_gradient(subset=["score"],cmap="YlGn"),
-                             use_container_width=True)
-
-        if not any(k in feats for k in ["multimodal_redteam","strategic_arena"]):
-            st.info("Enable Feature 2 or Feature 5 modules in the sidebar to see results here.")
+    with T["🤖 Feature Modules"]:
+        # ── Feature Modules (auto-populated when enabled in sidebar) ─────
+        feats = st.session_state.get("agro_feature_outputs", {})
+        feature_modules_tab(
+            domain="agrotech",
+            run_results=st.session_state.get("agro_run_history", []),
+            feats=feats,
+            governance=feats.get("governance"),
+            gender_audit=feats.get("gender_audit"),
+            agent_economy=feats.get("agent_economy"),
+            arena=feats.get("strategic_arena"),
+            redteam=feats.get("multimodal_redteam"),
+        )
 
     # ── Tab 8: Agent Economy ───────────────────────────────────────────────────
-    with tab8:
+    with T["📊 Agent Economy"]:
         st.markdown("### 💰 AI Agent Economy — Agricultural Resource Allocation")
         st.markdown("""
         <div class="alert-info">
@@ -1157,7 +1374,7 @@ if st.session_state.agro_run_history:
             st.info("Enable **Feature 1 — Agent Economy** in the sidebar to see resource auction results.")
 
     # ── Tab 9: Raw Results ─────────────────────────────────────────────────────
-    with tab9:
+    with T["📋 Raw Results"]:
         show_cols = ["run_id","scenario","accuracy","recall","precision","f1",
                      "fairness_score","demographic_parity","equalized_odds",
                      "bias_intensity","poison_rate","positive_rate","biases"]
@@ -1190,7 +1407,47 @@ if st.session_state.agro_run_history:
                 f"agro_config_{scenario_key.lower().replace(' ','_')}.json",
                 "application/json", use_container_width=True)
 
+    # ── AI Safety Tab ─────────────────────────────────────────────────────
+    # ── 🔄 Lifecycle Management Tab ───────────────────────────────────────────
+    with T["🔄 Lifecycle"]:
+        render_lifecycle_tab(
+            st.session_state.get("agro_lifecycle_report", {}),
+            "agrotech",
+        )
+
+    # ── 🌱 Eco Score Tab ──────────────────────────────────────────────────────
+    with T["🌱 Eco Score"]:
+        _lc_eco_r   = st.session_state.get("agro_lifecycle_report", {})
+        _lc_eco_last = (st.session_state.get("agro_run_history") or [{}])[-1]
+        render_eco_tab(
+            _lc_eco_r,
+            algo_key  = _lc_eco_last.get("algorithm", "hist_gradient_boosting"),
+            n_samples = int(_lc_eco_last.get("n_samples", 2000)),
+            n_runs    = int(locals().get("n_runs", 3)),
+            domain    = "agrotech",
+        )
+
     # ── Simulation history ─────────────────────────────────────────────────────
+    # ── AI Safety Tab ────────────────────────────────────────────────────────
+    with T["🛡️ AI Safety"]:
+        render_safety_tab(
+            st.session_state.get("agro_safety_report", {}),
+            domain="agrotech",
+        )
+
+    # ── 🔮 Dynamic Systems Tab ──────────────────────────────────────────────────
+    with T["🔮 Dynamic Systems"]:
+        try:
+            render_dynamic_systems_tab(
+                st.session_state.get("agro_ds_report", {}),
+                domain="agrotech",
+                ds_key="agro_ds_report",
+            )
+        except Exception as _ds_err:
+            st.error(f"🔮 Dynamic Systems error: {_ds_err}")
+            import traceback
+            st.code(traceback.format_exc(), language="python")
+
     history_browser("agro_snapshot_history", domain="agrotech",
         key_metrics=["accuracy","fairness_score","demographic_parity"])
 

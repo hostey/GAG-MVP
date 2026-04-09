@@ -33,169 +33,169 @@ import streamlit as st
 _GLOSSARY: Dict[str, Dict[str, str]] = {
     # ── Fairness metrics ──────────────────────────────────────────────────────
     "demographic parity": {
-        "plain": "Are predictions equally positive across groups? "
-                 "If the model approves 80% of Group A but only 50% of Group B, "
-                 "there is a 30% demographic parity gap — even if both groups have the same true risk.",
+        "plain":   "Are predictions equally positive across groups? "
+                   "If the model approves 80% of Group A but only 50% of Group B, "
+                   "there is a 30% demographic parity gap — even if both groups have the same true risk.",
         "formula": "gap = |positive_rate_A − positive_rate_B|",
         "example": "Group A: ██████████ 80% approved\n"
                    "Group B: █████      50% approved\n"
                    "Gap:     ████       30%  ← want this near 0%",
-        "target": "Gap ≤ 10% is generally considered acceptable.",
-        "risk": "High gap → certain groups are systematically treated differently.",
+        "target":  "Gap ≤ 10% is generally considered acceptable.",
+        "risk":    "High gap → certain groups are systematically treated differently.",
     },
     "equalized odds": {
-        "plain": "Do all groups experience the same error rates? "
-                 "Equalized odds requires both the false positive rate (FPR) and "
-                 "false negative rate (FNR) to be equal across groups.",
+        "plain":   "Do all groups experience the same error rates? "
+                   "Equalized odds requires both the false positive rate (FPR) and "
+                   "false negative rate (FNR) to be equal across groups.",
         "formula": "gap = max(|FPR_A − FPR_B|, |FNR_A − FNR_B|)",
         "example": "Group A FPR: 5%   FNR: 10%\n"
                    "Group B FPR: 20%  FNR: 35%\n"
                    "Gap:         15%  ← largest difference across both rates",
-        "target": "Gap ≤ 10% across both FPR and FNR.",
-        "risk": "High gap → certain groups are more likely to be wrongly flagged or missed.",
+        "target":  "Gap ≤ 10% across both FPR and FNR.",
+        "risk":    "High gap → certain groups are more likely to be wrongly flagged or missed.",
     },
     "fairness score": {
-        "plain": "A combined 0–1 score summarising overall algorithmic fairness. "
-                 "It is calculated from demographic parity and equalized odds together. "
-                 "1.0 means perfect fairness across all groups; 0.0 means maximum disparity.",
+        "plain":   "A combined 0–1 score summarising overall algorithmic fairness. "
+                   "It is calculated from demographic parity and equalized odds together. "
+                   "1.0 means perfect fairness across all groups; 0.0 means maximum disparity.",
         "formula": "fairness_score = 1 − (parity_gap + equalized_odds_gap) / 2",
         "example": "Score 0.9 → excellent fairness\n"
                    "Score 0.7 → acceptable (recommended minimum)\n"
                    "Score 0.5 → significant disparities detected\n"
                    "Score 0.3 → serious equity failure — do not deploy",
-        "target": "≥ 0.70 for deployment readiness.",
-        "risk": "Below 0.70 means the model is likely producing inequitable outcomes.",
+        "target":  "≥ 0.70 for deployment readiness.",
+        "risk":    "Below 0.70 means the model is likely producing inequitable outcomes.",
     },
     "false positive rate": {
-        "plain": "Of all the people who do NOT have the condition, "
-                 "what fraction does the model incorrectly flag as positive? "
-                 "In healthcare: the rate of healthy patients wrongly diagnosed. "
-                 "In security: the rate of innocent people wrongly flagged as threats.",
+        "plain":   "Of all the people who do NOT have the condition, "
+                   "what fraction does the model incorrectly flag as positive? "
+                   "In healthcare: the rate of healthy patients wrongly diagnosed. "
+                   "In security: the rate of innocent people wrongly flagged as threats.",
         "formula": "FPR = false_positives / (false_positives + true_negatives)",
         "example": "100 healthy patients → model flags 15 as sick\n"
                    "FPR = 15 / 100 = 15%  ← 15 unnecessary alarms",
-        "target": "Below 10% in most domains; below 5% in high-stakes contexts.",
-        "risk": "High FPR → unnecessary interventions, eroded trust, wasted resources.",
+        "target":  "Below 10% in most domains; below 5% in high-stakes contexts.",
+        "risk":    "High FPR → unnecessary interventions, eroded trust, wasted resources.",
     },
     "false negative rate": {
-        "plain": "Of all the people who DO have the condition, "
-                 "what fraction does the model miss? "
-                 "In healthcare: patients who needed care but were not identified.",
+        "plain":   "Of all the people who DO have the condition, "
+                   "what fraction does the model miss? "
+                   "In healthcare: patients who needed care but were not identified.",
         "formula": "FNR = false_negatives / (false_negatives + true_positives)",
         "example": "100 sick patients → model misses 20\n"
                    "FNR = 20 / 100 = 20%  ← 20 patients without care",
-        "target": "Below 15% in most domains; below 5% in life-critical contexts.",
-        "risk": "High FNR → missed diagnoses, undetected threats, systemic harm.",
+        "target":  "Below 15% in most domains; below 5% in life-critical contexts.",
+        "risk":    "High FNR → missed diagnoses, undetected threats, systemic harm.",
     },
     "sensitivity": {
-        "plain": "Also called Recall or True Positive Rate. "
-                 "Of all positive cases, what fraction did the model correctly detect? "
-                 "High sensitivity means the model rarely misses a real case.",
+        "plain":   "Also called Recall or True Positive Rate. "
+                   "Of all positive cases, what fraction did the model correctly detect? "
+                   "High sensitivity means the model rarely misses a real case.",
         "formula": "sensitivity = true_positives / (true_positives + false_negatives)",
         "example": "100 sick patients → model correctly identifies 85\n"
                    "Sensitivity = 85%  ← 15 patients missed",
-        "target": "≥ 75% is a common clinical safety threshold.",
-        "risk": "Low sensitivity → dangerous for disease screening where missing cases is costly.",
+        "target":  "≥ 75% is a common clinical safety threshold.",
+        "risk":    "Low sensitivity → dangerous for disease screening where missing cases is costly.",
     },
     "specificity": {
-        "plain": "Of all negative cases, what fraction did the model correctly leave unflagged? "
-                 "High specificity means the model rarely raises false alarms.",
+        "plain":   "Of all negative cases, what fraction did the model correctly leave unflagged? "
+                   "High specificity means the model rarely raises false alarms.",
         "formula": "specificity = true_negatives / (true_negatives + false_positives)",
         "example": "100 healthy patients → model correctly clears 90\n"
                    "Specificity = 90%  ← 10 unnecessary alarms",
-        "target": "≥ 80% to avoid overwhelming clinical teams with false alerts.",
-        "risk": "Low specificity → alert fatigue, unnecessary procedures, waste.",
+        "target":  "≥ 80% to avoid overwhelming clinical teams with false alerts.",
+        "risk":    "Low specificity → alert fatigue, unnecessary procedures, waste.",
     },
     # ── Attack metrics ────────────────────────────────────────────────────────
     "poison rate": {
-        "plain": "The fraction of training data that has been deliberately corrupted. "
-                 "Even 5–10% poisoning can significantly degrade a model's performance "
-                 "and fairness properties.",
+        "plain":   "The fraction of training data that has been deliberately corrupted. "
+                   "Even 5–10% poisoning can significantly degrade a model's performance "
+                   "and fairness properties.",
         "formula": "poison_rate = poisoned_samples / total_samples",
         "example": "1,000 records, 5% poisoning = 50 corrupted records\n"
                    "50 records with flipped labels quietly shift model behaviour",
-        "target": "Any poison rate above 0% is adversarial and should trigger investigation.",
-        "risk": "Poisoned models may produce accurate-looking but systematically biased results.",
+        "target":  "Any poison rate above 0% is adversarial and should trigger investigation.",
+        "risk":    "Poisoned models may produce accurate-looking but systematically biased results.",
     },
     "bias intensity": {
-        "plain": "Controls how strongly the selected bias types are injected into the data. "
-                 "0.0 = no bias; 0.5 = maximum. Even 0.2 can produce measurable "
-                 "fairness gaps in sensitive domains.",
+        "plain":   "Controls how strongly the selected bias types are injected into the data. "
+                   "0.0 = no bias; 0.5 = maximum. Even 0.2 can produce measurable "
+                   "fairness gaps in sensitive domains.",
         "formula": "Scales feature degradation / label flip probability for each bias type",
         "example": "0.0 → fair baseline\n"
                    "0.2 → mild bias (realistic)\n"
                    "0.4 → severe bias (adversarial conditions)",
-        "target": "Use 0.1–0.3 for realistic simulation; higher values test worst-case resilience.",
-        "risk": "High bias intensity + demographic bias type replicates real-world discrimination.",
+        "target":  "Use 0.1–0.3 for realistic simulation; higher values test worst-case resilience.",
+        "risk":    "High bias intensity + demographic bias type replicates real-world discrimination.",
     },
     # ── Security metrics ──────────────────────────────────────────────────────
     "liberty score": {
-        "plain": "A 0–1 composite score measuring how well civil liberties are preserved "
-                 "under the current surveillance configuration. It combines false positive rate, "
-                 "surveillance intensity, data retention period, and bias level, "
-                 "weighted by the oversight mechanism.",
+        "plain":   "A 0–1 composite score measuring how well civil liberties are preserved "
+                   "under the current surveillance configuration. It combines false positive rate, "
+                   "surveillance intensity, data retention period, and bias level, "
+                   "weighted by the oversight mechanism.",
         "formula": "liberty = 1 − (FPR×0.4 + surveillance×0.3 + retention×0.2 + bias×0.1) × oversight_multiplier",
         "example": "Surveillance 80%, no oversight → liberty ≈ 0.20 (very low)\n"
                    "Surveillance 40%, judicial review → liberty ≈ 0.65 (moderate)\n"
                    "Surveillance 20%, strong oversight → liberty ≈ 0.85 (good)",
-        "target": "≥ 0.60 is a reasonable civil-liberties floor; ≥ 0.75 is preferred.",
-        "risk": "Low liberty score indicates disproportionate surveillance impact on populations.",
+        "target":  "≥ 0.60 is a reasonable civil-liberties floor; ≥ 0.75 is preferred.",
+        "risk":    "Low liberty score indicates disproportionate surveillance impact on populations.",
     },
     "sociotechnical risk": {
-        "plain": "How likely a given attack modality is to succeed because of human factors "
-                 "(trust, cognitive load, stress) rather than purely technical vulnerabilities. "
-                 "Deepfakes score 0.90 because humans find them highly convincing "
-                 "even when they know deepfakes exist.",
+        "plain":   "How likely a given attack modality is to succeed because of human factors "
+                   "(trust, cognitive load, stress) rather than purely technical vulnerabilities. "
+                   "Deepfakes score 0.90 because humans find them highly convincing "
+                   "even when they know deepfakes exist.",
         "formula": "Assigned per modality: TEXT=0.4, IMAGE=0.6, AUDIO=0.5, DEEPFAKE=0.9",
         "example": "A perfect technical defence is irrelevant if a human operator \n"
                    "is fooled by a realistic-looking deepfake briefing under time pressure.",
-        "target": "Any modality with sociotechnical risk > 0.7 requires mandatory human review protocols.",
-        "risk": "High sociotechnical risk means the attack bypasses technical controls via human error.",
+        "target":  "Any modality with sociotechnical risk > 0.7 requires mandatory human review protocols.",
+        "risk":    "High sociotechnical risk means the attack bypasses technical controls via human error.",
     },
     # ── Agrotech / general ────────────────────────────────────────────────────
     "permeability score": {
-        "plain": "In the AI Agent Economy module, this measures how unequally "
-                 "resources (irrigation water, fertilizer, drone hours) are distributed "
-                 "after autonomous agents bid for them. "
-                 "High permeability means large agents dominate small ones.",
+        "plain":   "In the AI Agent Economy module, this measures how unequally "
+                   "resources (irrigation water, fertilizer, drone hours) are distributed "
+                   "after autonomous agents bid for them. "
+                   "High permeability means large agents dominate small ones.",
         "formula": "permeability = std(total_spent) / mean(total_spent)",
         "example": "Score 0.1 → equitable — all agents spend similarly\n"
                    "Score 0.5 → moderate inequality\n"
                    "Score 1.0+ → one agent dominates; smallholders excluded",
-        "target": "Below 0.5 for equitable resource allocation.",
-        "risk": "High permeability → AI-driven resource allocation may systematically "
-                "disadvantage smallholder farmers relative to commercial operations.",
+        "target":  "Below 0.5 for equitable resource allocation.",
+        "risk":    "High permeability → AI-driven resource allocation may systematically "
+                   "disadvantage smallholder farmers relative to commercial operations.",
     },
     "digital inclusion score": {
-        "plain": "Measures whether an AI system is accessible to people with limited "
-                 "digital connectivity (no smartphone, low bandwidth, feature phone only). "
-                 "In Nigeria, only ~34% of smallholder farmers have reliable smartphone access.",
+        "plain":   "Measures whether an AI system is accessible to people with limited "
+                   "digital connectivity (no smartphone, low bandwidth, feature phone only). "
+                   "In Nigeria, only ~34% of smallholder farmers have reliable smartphone access.",
         "formula": "digital_inclusion = baseline_connectivity + (1 − prediction_gap)",
         "example": "Score 0.8 → system works for most users regardless of connectivity\n"
                    "Score 0.4 → system effectively excludes low-connectivity populations\n"
                    "Score < 0.5 → USSD/SMS fallback interface urgently needed",
-        "target": "≥ 0.60 minimum; ≥ 0.75 recommended for deployment in Nigeria/Africa.",
-        "risk": "Low score means the AI tool only benefits users who are already advantaged.",
+        "target":  "≥ 0.60 minimum; ≥ 0.75 recommended for deployment in Nigeria/Africa.",
+        "risk":    "Low score means the AI tool only benefits users who are already advantaged.",
     },
     "gender gap": {
-        "plain": "The accuracy difference between female and male demographic groups "
-                 "in the UNESCO Women4EthicalAI audit. A gap means the model "
-                 "performs systematically worse for one gender.",
+        "plain":   "The accuracy difference between female and male demographic groups "
+                   "in the UNESCO Women4EthicalAI audit. A gap means the model "
+                   "performs systematically worse for one gender.",
         "formula": "gender_gap = |accuracy_female − accuracy_male|",
         "example": "Female group accuracy: 72%\n"
                    "Male group accuracy:   85%\n"
                    "Gender gap:            13%  ← exceeds 5% threshold",
-        "target": "≤ 5% for UNESCO Women4EthicalAI compliance.",
-        "risk": "Any gap above 5% means women (often already disadvantaged) "
-                "receive materially worse AI service.",
+        "target":  "≤ 5% for UNESCO Women4EthicalAI compliance.",
+        "risk":    "Any gap above 5% means women (often already disadvantaged) "
+                   "receive materially worse AI service.",
     },
 }
 
 
 def metric_glossary_expander(
-        metrics_to_show: Optional[List[str]] = None,
-        collapsed: bool = True,
-        location: str = "main",  # "main" | "sidebar"
+    metrics_to_show: Optional[List[str]] = None,
+    collapsed: bool = True,
+    location: str = "main",  # "main" | "sidebar"
 ) -> None:
     """
     Render an expandable glossary panel explaining every metric shown on the page.
@@ -223,8 +223,8 @@ def metric_glossary_expander(
         return
 
     with st.expander(
-            f"📖 What do these metrics mean? ({len(available)} definitions — click to expand)",
-            expanded=not collapsed,
+        f"📖 What do these metrics mean? ({len(available)} definitions — click to expand)",
+        expanded=not collapsed,
     ):
         st.markdown(
             "<p style='color:var(--color-text-secondary);font-size:.9rem;margin-bottom:1rem;'>"
@@ -234,11 +234,11 @@ def metric_glossary_expander(
         )
 
         # Two-column grid of metric cards
-        items = list(available.items())
+        items  = list(available.items())
         n_cols = 2
         for row_start in range(0, len(items), n_cols):
             cols = st.columns(n_cols)
-            for col, (name, data) in zip(cols, items[row_start: row_start + n_cols]):
+            for col, (name, data) in zip(cols, items[row_start : row_start + n_cols]):
                 with col:
                     st.markdown(
                         f"""
@@ -288,62 +288,62 @@ _PRESETS: Dict[str, Dict[str, Any]] = {
             "icon": "🏛️",
             "desc": "Strict fairness audit. Minimal bias, low attack, maximum runs.",
             "settings": {
-                "data_source": "Synthetic Only",
-                "selected_biases": ["demographic", "socioeconomic"],
-                "bias_intensity": 0.1,
-                "poison_rate": 0.02,
-                "access_inequality": 0.2,
-                "n_runs": 5,
-                "enable_governance": True,
-                "enable_gender_audit": True,
-                "enable_redteam": False,
+                "data_source":        "Synthetic Only",
+                "selected_biases":    ["demographic", "socioeconomic"],
+                "bias_intensity":     0.1,
+                "poison_rate":        0.02,
+                "access_inequality":  0.2,
+                "n_runs":             5,
+                "enable_governance":  True,
+                "enable_gender_audit":True,
+                "enable_redteam":     False,
             },
         },
         "ML Researcher": {
             "icon": "🔬",
             "desc": "All bias types, high attack strength, full feature modules.",
             "settings": {
-                "data_source": "Synthetic Only",
-                "selected_biases": ["demographic", "historical", "measurement",
-                                    "geographic", "gender", "linguistic"],
-                "bias_intensity": 0.4,
-                "poison_rate": 0.15,
-                "access_inequality": 0.5,
-                "n_runs": 5,
-                "enable_governance": True,
-                "enable_gender_audit": True,
-                "enable_redteam": True,
-                "enable_arena": True,
+                "data_source":        "Synthetic Only",
+                "selected_biases":    ["demographic","historical","measurement",
+                                       "geographic","gender","linguistic"],
+                "bias_intensity":     0.4,
+                "poison_rate":        0.15,
+                "access_inequality":  0.5,
+                "n_runs":             5,
+                "enable_governance":  True,
+                "enable_gender_audit":True,
+                "enable_redteam":     True,
+                "enable_arena":       True,
             },
         },
         "Hospital Administrator": {
             "icon": "🏥",
             "desc": "Real UCI data. Focus on income gaps and clinical safety.",
             "settings": {
-                "data_source": "Heart Disease (UCI)",
-                "selected_biases": ["demographic", "socioeconomic"],
-                "bias_intensity": 0.25,
-                "poison_rate": 0.05,
-                "access_inequality": 0.4,
-                "n_runs": 3,
-                "enable_governance": True,
-                "enable_gender_audit": False,
-                "enable_redteam": False,
+                "data_source":        "Heart Disease (UCI)",
+                "selected_biases":    ["demographic", "socioeconomic"],
+                "bias_intensity":     0.25,
+                "poison_rate":        0.05,
+                "access_inequality":  0.4,
+                "n_runs":             3,
+                "enable_governance":  True,
+                "enable_gender_audit":False,
+                "enable_redteam":     False,
             },
         },
         "Patient Advocate": {
             "icon": "🤝",
             "desc": "Maximum equity focus. Gender, linguistic, and access biases.",
             "settings": {
-                "data_source": "Abuja Multilingual Healthcare",
-                "selected_biases": ["demographic", "gender", "linguistic", "socioeconomic"],
-                "bias_intensity": 0.35,
-                "poison_rate": 0.05,
-                "access_inequality": 0.6,
-                "n_runs": 3,
-                "enable_governance": True,
-                "enable_gender_audit": True,
-                "enable_redteam": False,
+                "data_source":        "Abuja Multilingual Healthcare",
+                "selected_biases":    ["demographic","gender","linguistic","socioeconomic"],
+                "bias_intensity":     0.35,
+                "poison_rate":        0.05,
+                "access_inequality":  0.6,
+                "n_runs":             3,
+                "enable_governance":  True,
+                "enable_gender_audit":True,
+                "enable_redteam":     False,
             },
         },
     },
@@ -354,69 +354,69 @@ _PRESETS: Dict[str, Dict[str, Any]] = {
             "icon": "⚖️",
             "desc": "Low surveillance, judicial oversight, focus on FPR and liberty score.",
             "settings": {
-                "data_source": "Synthetic",
-                "selected_biases": ["demographic", "geographic"],
-                "bias_intensity": 0.15,
-                "poison_rate": 0.03,
-                "surveillance_level": 25,
-                "data_retention": 30,
-                "oversight_level": "Judicial Review",
-                "n_runs": 5,
-                "enable_governance": True,
-                "enable_redteam": False,
-                "threat_level": 3,
+                "data_source":         "Synthetic",
+                "selected_biases":     ["demographic", "geographic"],
+                "bias_intensity":      0.15,
+                "poison_rate":         0.03,
+                "surveillance_level":  25,
+                "data_retention":      30,
+                "oversight_level":     "Judicial Review",
+                "n_runs":              5,
+                "enable_governance":   True,
+                "enable_redteam":      False,
+                "threat_level":        3,
             },
         },
         "Security Engineer": {
             "icon": "🛡️",
             "desc": "High surveillance, advanced attacks, full red-team active.",
             "settings": {
-                "data_source": "Synthetic",
-                "selected_biases": ["demographic", "historical", "measurement"],
-                "bias_intensity": 0.3,
-                "poison_rate": 0.12,
-                "surveillance_level": 75,
-                "data_retention": 180,
-                "oversight_level": "Moderate",
-                "n_runs": 3,
-                "enable_governance": True,
-                "enable_redteam": True,
-                "enable_arena": True,
-                "threat_level": 8,
+                "data_source":         "Synthetic",
+                "selected_biases":     ["demographic","historical","measurement"],
+                "bias_intensity":      0.3,
+                "poison_rate":         0.12,
+                "surveillance_level":  75,
+                "data_retention":      180,
+                "oversight_level":     "Moderate",
+                "n_runs":              3,
+                "enable_governance":   True,
+                "enable_redteam":      True,
+                "enable_arena":        True,
+                "threat_level":        8,
             },
         },
         "Policy Researcher": {
             "icon": "📋",
             "desc": "GTD real data, balanced surveillance, moderate threat.",
             "settings": {
-                "data_source": "Real-World",
-                "selected_biases": ["demographic", "geographic", "historical"],
-                "bias_intensity": 0.2,
-                "poison_rate": 0.05,
-                "surveillance_level": 50,
-                "data_retention": 90,
-                "oversight_level": "Strong",
-                "n_runs": 3,
-                "enable_governance": True,
-                "enable_redteam": False,
-                "threat_level": 5,
+                "data_source":         "Real-World",
+                "selected_biases":     ["demographic","geographic","historical"],
+                "bias_intensity":      0.2,
+                "poison_rate":         0.05,
+                "surveillance_level":  50,
+                "data_retention":      90,
+                "oversight_level":     "Strong",
+                "n_runs":              3,
+                "enable_governance":   True,
+                "enable_redteam":      False,
+                "threat_level":        5,
             },
         },
         "Quick Demo": {
             "icon": "▶️",
             "desc": "Fastest path to results. 1 run, minimal config.",
             "settings": {
-                "data_source": "Synthetic",
-                "selected_biases": ["demographic"],
-                "bias_intensity": 0.2,
-                "poison_rate": 0.05,
-                "surveillance_level": 50,
-                "data_retention": 90,
-                "oversight_level": "Moderate",
-                "n_runs": 1,
-                "enable_governance": False,
-                "enable_redteam": False,
-                "threat_level": 5,
+                "data_source":         "Synthetic",
+                "selected_biases":     ["demographic"],
+                "bias_intensity":      0.2,
+                "poison_rate":         0.05,
+                "surveillance_level":  50,
+                "data_retention":      90,
+                "oversight_level":     "Moderate",
+                "n_runs":              1,
+                "enable_governance":   False,
+                "enable_redteam":      False,
+                "threat_level":        5,
             },
         },
     },
@@ -427,62 +427,62 @@ _PRESETS: Dict[str, Dict[str, Any]] = {
             "icon": "🌿",
             "desc": "Abuja FCT context, gender audit, agent economy active.",
             "settings": {
-                "scenario_key": "Plateau State Smallholder",
-                "selected_biases": ["demographic", "gender", "geographic"],
-                "bias_intensity": 0.25,
-                "poison_rate": 0.04,
-                "n_runs": 3,
-                "enable_xai": True,
+                "scenario_key":        "Plateau State Smallholder",
+                "selected_biases":     ["demographic","gender","geographic"],
+                "bias_intensity":      0.25,
+                "poison_rate":         0.04,
+                "n_runs":              3,
+                "enable_xai":          True,
                 "enable_gender_audit": True,
-                "enable_agent_economy": True,
-                "enable_governance": True,
+                "enable_agent_economy":True,
+                "enable_governance":   True,
             },
         },
         "Development Economist": {
             "icon": "📊",
             "desc": "All bias types. Intersectional analysis. Full compliance report.",
             "settings": {
-                "scenario_key": "FCT Market Access",
-                "selected_biases": ["demographic", "gender", "linguistic",
-                                    "socioeconomic", "geographic"],
-                "bias_intensity": 0.35,
-                "poison_rate": 0.08,
-                "n_runs": 5,
-                "enable_xai": True,
+                "scenario_key":        "FCT Market Access",
+                "selected_biases":     ["demographic","gender","linguistic",
+                                        "socioeconomic","geographic"],
+                "bias_intensity":      0.35,
+                "poison_rate":         0.08,
+                "n_runs":              5,
+                "enable_xai":          True,
                 "enable_gender_audit": True,
-                "enable_agent_economy": True,
-                "enable_governance": True,
-                "enable_redteam": False,
+                "enable_agent_economy":True,
+                "enable_governance":   True,
+                "enable_redteam":      False,
             },
         },
         "Climate Researcher": {
             "icon": "🌦️",
             "desc": "Climate risk focus. Minimal bias, high climate stress.",
             "settings": {
-                "scenario_key": "Climate Risk Assessment",
-                "selected_biases": ["temporal", "geographic"],
-                "bias_intensity": 0.15,
-                "poison_rate": 0.03,
-                "n_runs": 3,
-                "enable_xai": True,
+                "scenario_key":        "Climate Risk Assessment",
+                "selected_biases":     ["temporal","geographic"],
+                "bias_intensity":      0.15,
+                "poison_rate":         0.03,
+                "n_runs":              3,
+                "enable_xai":          True,
                 "enable_gender_audit": False,
-                "enable_agent_economy": False,
-                "enable_governance": True,
+                "enable_agent_economy":False,
+                "enable_governance":   True,
             },
         },
         "Quick Demo": {
             "icon": "▶️",
             "desc": "Single run, basic bias, XAI on.",
             "settings": {
-                "scenario_key": "Plateau State Smallholder",
-                "selected_biases": ["demographic", "gender"],
-                "bias_intensity": 0.2,
-                "poison_rate": 0.05,
-                "n_runs": 1,
-                "enable_xai": True,
+                "scenario_key":        "Plateau State Smallholder",
+                "selected_biases":     ["demographic","gender"],
+                "bias_intensity":      0.2,
+                "poison_rate":         0.05,
+                "n_runs":              1,
+                "enable_xai":          True,
                 "enable_gender_audit": True,
-                "enable_agent_economy": False,
-                "enable_governance": False,
+                "enable_agent_economy":False,
+                "enable_governance":   False,
             },
         },
     },
@@ -518,7 +518,7 @@ def preset_selector(domain: str) -> Optional[Dict[str, Any]]:
         unsafe_allow_html=True,
     )
 
-    names = list(presets.keys())
+    names  = list(presets.keys())
     preset_key = f"_preset_choice_{domain}"
 
     # Render as compact radio
@@ -526,7 +526,7 @@ def preset_selector(domain: str) -> Optional[Dict[str, Any]]:
         "Persona",
         ["— custom —"] + names,
         format_func=lambda x: x if x == "— custom —"
-        else f"{presets[x]['icon']} {x}",
+                              else f"{presets[x].get("icon","")} {x}",
         key=preset_key,
         label_visibility="collapsed",
         horizontal=False,
@@ -555,9 +555,9 @@ def preset_selector(domain: str) -> Optional[Dict[str, Any]]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def history_browser(
-        history_key: str,
-        domain: str = "health",
-        key_metrics: Optional[List[str]] = None,
+    history_key: str,
+    domain: str = "health",
+    key_metrics: Optional[List[str]] = None,
 ) -> None:
     """
     Render a simulation history panel showing all past runs with
@@ -583,15 +583,15 @@ def history_browser(
 
     snapshots: List[Dict] = st.session_state[history_key]
     metrics = key_metrics or ["accuracy", "fairness_score", "equity_score",
-                              "fairness_score", "liberty_score"]
+                               "fairness_score", "liberty_score"]
 
     # Theme colours per domain
     domain_color = {"health": "#2980b9", "security": "#1e3c72", "agrotech": "#3b6d11"}
     accent = domain_color.get(domain, "#2980b9")
 
     with st.expander(
-            f"🕐 Simulation history ({len(snapshots)} saved runs)",
-            expanded=False,
+        f"🕐 Simulation history ({len(snapshots)} saved runs)",
+        expanded=False,
     ):
         if not snapshots:
             st.info(
@@ -609,12 +609,12 @@ def history_browser(
         # ── Timeline cards ────────────────────────────────────────────────────
         import pandas as pd
         for i, snap in enumerate(reversed(snapshots)):
-            snap_id = snap.get("id", i)
-            ts = snap.get("timestamp", "")[:16].replace("T", " ")
-            label = snap.get("label", f"Run {snap_id}")
+            snap_id      = snap.get("id", i)
+            ts           = snap.get("timestamp", "")[:16].replace("T", " ")
+            label        = snap.get("label", f"Run {snap_id}")
             snap_metrics = snap.get("metrics", {})
-            snap_config = snap.get("config", {})
-            annotation = snap.get("annotation", "")
+            snap_config  = snap.get("config", {})
+            annotation   = snap.get("annotation", "")
 
             with st.container():
                 c_info, c_metrics, c_actions = st.columns([3, 4, 2])
@@ -639,7 +639,7 @@ def history_browser(
                              if k in snap_metrics][:3]
                     cols = st.columns(len(shown)) if shown else []
                     for col, (k, v) in zip(cols, shown):
-                        label_short = k.replace("_", " ").replace("score", "").strip()
+                        label_short = k.replace("_", " ").replace("score","").strip()
                         col.metric(label_short.title(), f"{v:.2f}" if isinstance(v, float) else v)
 
                 with c_actions:
@@ -685,7 +685,7 @@ def history_browser(
                     key=f"_hist_metric_{domain}",
                 )
                 chart_data = [
-                    {"Run": s.get("label", f"Run {s.get('id', i)}"),
+                    {"Run": s.get("label", f"Run {s.get('id',i)}"),
                      metric_to_plot: s.get("metrics", {}).get(metric_to_plot, 0)}
                     for i, s in enumerate(snapshots)
                     if metric_to_plot in s.get("metrics", {})
@@ -693,11 +693,11 @@ def history_browser(
                 if chart_data:
                     fig = px.bar(
                         chart_data, x="Run", y=metric_to_plot,
-                        title=f"{metric_to_plot.replace('_', ' ').title()} across saved runs",
+                        title=f"{metric_to_plot.replace('_',' ').title()} across saved runs",
                         color=metric_to_plot,
                         color_continuous_scale="RdYlGn" if "fairness" in metric_to_plot
-                                                           or "equity" in metric_to_plot
-                        else "Blues",
+                                                        or "equity" in metric_to_plot
+                                                        else "Blues",
                     )
                     fig.update_layout(showlegend=False, height=280)
                     st.plotly_chart(fig, use_container_width=True)
@@ -720,11 +720,11 @@ def history_browser(
 
 
 def save_to_history(
-        history_key: str,
-        label: str,
-        metrics: Dict[str, float],
-        config: Dict[str, Any],
-        annotation: str = "",
+    history_key: str,
+    label: str,
+    metrics: Dict[str, float],
+    config: Dict[str, Any],
+    annotation: str = "",
 ) -> None:
     """
     Save the current simulation result into the history list.
@@ -739,15 +739,15 @@ def save_to_history(
         st.session_state[history_key] = []
 
     history = st.session_state[history_key]
-    new_id = len(history) + 1
+    new_id  = len(history) + 1
 
     history.append({
-        "id": new_id,
-        "timestamp": datetime.now().isoformat(),
-        "label": label or f"Run {new_id}",
-        "metrics": {k: round(v, 4) if isinstance(v, float) else v
-                    for k, v in metrics.items()},
-        "config": config,
+        "id":         new_id,
+        "timestamp":  datetime.now().isoformat(),
+        "label":      label or f"Run {new_id}",
+        "metrics":    {k: round(v, 4) if isinstance(v, float) else v
+                       for k, v in metrics.items()},
+        "config":     config,
         "annotation": annotation,
     })
     # Keep last 20 snapshots to avoid unbounded memory growth
@@ -816,8 +816,8 @@ _TOUR_STEPS: Dict[str, List[Dict[str, str]]] = {
 
 
 def guided_tour_banner(
-        domain: str,
-        dismissed_key: Optional[str] = None,
+    domain: str,
+    dismissed_key: Optional[str] = None,
 ) -> None:
     """
     Show a guided onboarding banner for first-time users.
@@ -847,11 +847,11 @@ def guided_tour_banner(
         return
 
     domain_labels = {"health": "Healthcare", "security": "National Security", "agrotech": "Agrotech"}
-    domain_icons = {"health": "🏥", "security": "🛡️", "agrotech": "🌾"}
+    domain_icons  = {"health": "🏥", "security": "🛡️", "agrotech": "🌾"}
     domain_colors = {"health": "#2980b9", "security": "#1e3c72", "agrotech": "#3b6d11"}
 
     label = domain_labels.get(domain, "GAGS")
-    icon = domain_icons.get(domain, "▶")
+    icon  = domain_icons.get(domain, "▶")
     color = domain_colors.get(domain, "#2980b9")
 
     st.markdown(
@@ -870,7 +870,7 @@ def guided_tour_banner(
           </div>
           <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;">
             {"".join(
-            f'''<div style="background:var(--color-background-primary);
+              f'''<div style="background:var(--color-background-primary);
                              border:0.5px solid {color}44;
                              border-radius:var(--border-radius-md);
                              padding:.6rem .75rem;">
@@ -883,8 +883,8 @@ def guided_tour_banner(
                    <div style="font-size:.75rem;color:var(--color-text-secondary);
                                line-height:1.4;">{s['body']}</div>
                  </div>'''
-            for s in steps
-        )}
+              for s in steps
+            )}
           </div>
         </div>
         """,
@@ -892,9 +892,9 @@ def guided_tour_banner(
     )
 
     if st.button(
-            "✓ Got it — dismiss this guide",
-            key=f"_tour_dismiss_btn_{domain}",
-            help="You can re-read this guide in the Help section",
+        "✓ Got it — dismiss this guide",
+        key=f"_tour_dismiss_btn_{domain}",
+        help="You can re-read this guide in the Help section",
     ):
         st.session_state[dismiss_key] = True
         st.rerun()
@@ -913,10 +913,10 @@ Falls back gracefully to a copy-to-clipboard JSON block on older versions.
 Usage
 -----
     from components.ux_utils import share_url_panel, load_config_from_url
-
+    
     # At page top (before sidebar widgets), load any URL-encoded config:
     url_cfg = load_config_from_url()
-
+    
     # In the results section, show the share panel:
     share_url_panel(domain="health", config={...})
 """
@@ -966,10 +966,10 @@ def load_config_from_url(param_name: str = "cfg") -> Optional[Dict[str, Any]]:
 
 
 def share_url_panel(
-        domain: str,
-        config: Dict[str, Any],
-        page_path: str = "",
-        param_name: str = "cfg",
+    domain: str,
+    config: Dict[str, Any],
+    page_path: str = "",
+    param_name: str = "cfg",
 ) -> None:
     """
     Render a "Share this simulation" panel with a copyable URL and JSON export.
@@ -987,9 +987,9 @@ def share_url_panel(
     """
     domain_labels = {"health": "Healthcare", "security": "National Security",
                      "agrotech": "Agrotech"}
-    domain_label = domain_labels.get(domain, domain.title())
+    domain_label  = domain_labels.get(domain, domain.title())
     domain_colors = {"health": "#2980b9", "security": "#c0392b", "agrotech": "#27ae60"}
-    color = domain_colors.get(domain, "#8e44ad")
+    color         = domain_colors.get(domain, "#8e44ad")
 
     # Build the encoded config
     share_config = {k: v for k, v in config.items()
@@ -998,7 +998,7 @@ def share_url_panel(
     share_config["domain"] = domain
     share_config["shared_at"] = datetime.now().isoformat()[:16]
 
-    encoded = _encode_config(share_config)
+    encoded  = _encode_config(share_config)
     base_url = f"http://localhost:8501/{page_path}".rstrip("/")
     full_url = f"{base_url}?{param_name}={encoded}"
 
@@ -1115,28 +1115,28 @@ Usage
 """
 
 _ANNOTATION_TYPES = ["finding", "concern", "recommendation", "question", "approval"]
-_SEVERITY_LEVELS = ["critical", "high", "medium", "low", "info"]
+_SEVERITY_LEVELS  = ["critical", "high", "medium", "low", "info"]
 
 _TYPE_ICONS = {
-    "finding": "🔍",
-    "concern": "⚠️",
+    "finding":        "🔍",
+    "concern":        "⚠️",
     "recommendation": "💡",
-    "question": "❓",
-    "approval": "✅",
+    "question":       "❓",
+    "approval":       "✅",
 }
 _SEVERITY_COLORS = {
     "critical": "#e74c3c",
-    "high": "#e67e22",
-    "medium": "#f39c12",
-    "low": "#3498db",
-    "info": "#95a5a6",
+    "high":     "#e67e22",
+    "medium":   "#f39c12",
+    "low":      "#3498db",
+    "info":     "#95a5a6",
 }
 
 
 def annotation_panel(
-        store_key: str,
-        context_label: str = "this simulation",
-        allow_import: bool = True,
+    store_key: str,
+    context_label: str = "this simulation",
+    allow_import: bool = True,
 ) -> None:
     """
     Render a full annotation / audit-trail panel.
@@ -1158,9 +1158,9 @@ def annotation_panel(
     annotations: List[Dict] = st.session_state[store_key]
 
     with st.expander(
-            f"📝 Annotations & Audit Trail ({len(annotations)} note"
-            f"{'s' if len(annotations) != 1 else ''})",
-            expanded=False,
+        f"📝 Annotations & Audit Trail ({len(annotations)} note"
+        f"{'s' if len(annotations) != 1 else ''})",
+        expanded=False,
     ):
         st.markdown(
             "<p style='font-size:.85rem;color:var(--color-text-secondary);"
@@ -1184,7 +1184,7 @@ def annotation_panel(
             ann_type = st.selectbox(
                 "Type",
                 _ANNOTATION_TYPES,
-                format_func=lambda x: f"{_TYPE_ICONS.get(x, '')} {x.title()}",
+                format_func=lambda x: f"{_TYPE_ICONS.get(x,'')} {x.title()}",
                 key=f"_ann_type_{store_key}",
                 label_visibility="collapsed",
             )
@@ -1222,20 +1222,20 @@ def annotation_panel(
         )
 
         if st.button(
-                f"{_TYPE_ICONS.get(ann_type, '📝')} Add {ann_type.title()}",
-                key=f"_ann_add_{store_key}",
-                disabled=not ann_text.strip(),
-                use_container_width=False,
+            f"{_TYPE_ICONS.get(ann_type, '📝')} Add {ann_type.title()}",
+            key=f"_ann_add_{store_key}",
+            disabled=not ann_text.strip(),
+            use_container_width=False,
         ):
             new_ann = {
-                "id": len(annotations) + 1,
-                "type": ann_type,
-                "severity": ann_severity,
-                "author": ann_author.strip() or "Anonymous",
-                "text": ann_text.strip(),
-                "metric": ann_metric.strip() or None,
-                "timestamp": datetime.now().isoformat(),
-                "context": context_label,
+                "id":           len(annotations) + 1,
+                "type":         ann_type,
+                "severity":     ann_severity,
+                "author":       ann_author.strip() or "Anonymous",
+                "text":         ann_text.strip(),
+                "metric":       ann_metric.strip() or None,
+                "timestamp":    datetime.now().isoformat(),
+                "context":      context_label,
             }
             st.session_state[store_key].append(new_ann)
             # Remember author for next annotation
@@ -1276,13 +1276,13 @@ def annotation_panel(
             shown = [
                 a for a in reversed(annotations)
                 if (not filter_type or a["type"] in filter_type)
-                   and (not filter_sev or a["severity"] in filter_sev)
+                and (not filter_sev or a["severity"] in filter_sev)
             ]
 
             for ann in shown:
-                sev_col = _SEVERITY_COLORS.get(ann["severity"], "#888")
+                sev_col  = _SEVERITY_COLORS.get(ann["severity"], "#888")
                 type_icon = _TYPE_ICONS.get(ann["type"], "📝")
-                ts = ann["timestamp"][:16].replace("T", " ")
+                ts        = ann["timestamp"][:16].replace("T", " ")
 
                 # Annotation card
                 st.markdown(
@@ -1297,9 +1297,9 @@ def annotation_panel(
                     f"<span style='font-size:.8rem;font-weight:600;"
                     f"color:{sev_col};text-transform:uppercase;'>{ann['severity']}</span>"
                     f"<span style='font-size:.78rem;font-weight:500;"
-                    f"color:var(--color-text-primary);'>{ann['type'].title()}</span>"
+                    f"color:var(--color-text-primary);'>{ann.get("type","").title()}</span>"
                     f"<span style='margin-left:auto;font-size:.75rem;"
-                    f"color:var(--color-text-tertiary);'>{ann['author']} · {ts}</span>"
+                    f"color:var(--color-text-tertiary);'>{ann.get("author","")} · {ts}</span>"
                     f"</div>"
 
                     f"<p style='margin:0;font-size:.85rem;"
@@ -1318,9 +1318,9 @@ def annotation_panel(
 
                 # Delete button (inline, compact)
                 if st.button(
-                        "✕ Remove",
-                        key=f"_ann_del_{store_key}_{ann['id']}",
-                        help="Remove this annotation",
+                    "✕ Remove",
+                    key=f"_ann_del_{store_key}_{ann['id']}",
+                    help="Remove this annotation",
                 ):
                     st.session_state[store_key] = [
                         a for a in annotations if a["id"] != ann["id"]
@@ -1334,11 +1334,11 @@ def annotation_panel(
         with ex1:
             if annotations:
                 export_data = {
-                    "gags_version": "3.0",
-                    "exported_at": datetime.now().isoformat(),
-                    "context": context_label,
+                    "gags_version":   "3.0",
+                    "exported_at":    datetime.now().isoformat(),
+                    "context":        context_label,
                     "annotation_count": len(annotations),
-                    "annotations": annotations,
+                    "annotations":    annotations,
                 }
                 st.download_button(
                     "📥 Export audit trail (JSON)",
@@ -1410,124 +1410,713 @@ Usage
 # Keys must match what the page modules check
 ROLE_TAB_VISIBILITY: Dict[str, Dict[str, bool]] = {
     "Data Scientist": {
-        "show_performance": True,
-        "show_equity": True,
-        "show_clinical": True,
+        "show_performance":     True,
+        "show_equity":          True,
+        "show_clinical":        True,
         "show_feature_modules": True,
-        "show_data_analysis": True,
-        "show_xai": True,
-        "show_compliance": True,
-        "show_longitudinal": True,
-        "show_federated": True,
-        "show_raw_results": True,
-        "show_advanced_sidebar": True,
-        "show_kpi_detail": True,
-        "show_annotation": True,
+        "show_data_analysis":   True,
+        "show_xai":             True,
+        "show_compliance":      True,
+        "show_longitudinal":    True,
+        "show_federated":       True,
+        "show_raw_results":     True,
+        "show_advanced_sidebar":True,
+        "show_kpi_detail":      True,
+        "show_annotation":      True,
     },
     "Clinician": {
-        "show_performance": True,
-        "show_equity": True,
-        "show_clinical": True,
+        "show_performance":     True,
+        "show_equity":          True,
+        "show_clinical":        True,
         "show_feature_modules": False,
-        "show_data_analysis": False,
-        "show_xai": True,  # plain-language explanations are useful
-        "show_compliance": False,
-        "show_longitudinal": False,
-        "show_federated": False,
-        "show_raw_results": False,
-        "show_advanced_sidebar": False,
-        "show_kpi_detail": True,
-        "show_annotation": True,
+        "show_data_analysis":   False,
+        "show_xai":             True,   # plain-language explanations are useful
+        "show_compliance":      False,
+        "show_longitudinal":    False,
+        "show_federated":       False,
+        "show_raw_results":     False,
+        "show_advanced_sidebar":False,
+        "show_kpi_detail":      True,
+        "show_annotation":      True,
     },
     "Regulator": {
-        "show_performance": True,
-        "show_equity": True,
-        "show_clinical": False,
+        "show_performance":     True,
+        "show_equity":          True,
+        "show_clinical":        False,
         "show_feature_modules": False,
-        "show_data_analysis": False,
-        "show_xai": True,
-        "show_compliance": True,
-        "show_longitudinal": True,
-        "show_federated": False,
-        "show_raw_results": False,
-        "show_advanced_sidebar": False,
-        "show_kpi_detail": True,
-        "show_annotation": True,
+        "show_data_analysis":   False,
+        "show_xai":             True,
+        "show_compliance":      True,
+        "show_longitudinal":    True,
+        "show_federated":       False,
+        "show_raw_results":     False,
+        "show_advanced_sidebar":False,
+        "show_kpi_detail":      True,
+        "show_annotation":      True,
     },
     "Board Member": {
-        "show_performance": True,
-        "show_equity": False,
-        "show_clinical": False,
+        "show_performance":     True,
+        "show_equity":          False,
+        "show_clinical":        False,
         "show_feature_modules": False,
-        "show_data_analysis": False,
-        "show_xai": False,
-        "show_compliance": True,  # just the verdict card
-        "show_longitudinal": False,
-        "show_federated": False,
-        "show_raw_results": False,
-        "show_advanced_sidebar": False,
-        "show_kpi_detail": False,  # show simplified cards only
-        "show_annotation": False,
+        "show_data_analysis":   False,
+        "show_xai":             False,
+        "show_compliance":      True,   # just the verdict card
+        "show_longitudinal":    False,
+        "show_federated":       False,
+        "show_raw_results":     False,
+        "show_advanced_sidebar":False,
+        "show_kpi_detail":      False,  # show simplified cards only
+        "show_annotation":      False,
     },
     "Field Officer": {
-        "show_performance": True,
-        "show_equity": True,
-        "show_clinical": False,
+        "show_performance":     True,
+        "show_equity":          True,
+        "show_clinical":        False,
         "show_feature_modules": False,
-        "show_data_analysis": False,
-        "show_xai": True,  # counterfactual "what to change" is actionable
-        "show_compliance": False,
-        "show_longitudinal": False,
-        "show_federated": False,
-        "show_raw_results": False,
-        "show_advanced_sidebar": False,
-        "show_kpi_detail": False,
-        "show_annotation": True,
+        "show_data_analysis":   False,
+        "show_xai":             True,   # counterfactual "what to change" is actionable
+        "show_compliance":      False,
+        "show_longitudinal":    False,
+        "show_federated":       False,
+        "show_raw_results":     False,
+        "show_advanced_sidebar":False,
+        "show_kpi_detail":      False,
+        "show_annotation":      True,
     },
 }
 
 _ROLE_DESCRIPTIONS = {
-    "Data Scientist": "Full interface — all tabs, controls, and technical metrics.",
-    "Clinician": "Clinical safety focus — sensitivity, equity, and patient impact.",
-    "Regulator": "Compliance focus — fairness audit, governance, annotation trail.",
-    "Board Member": "Executive summary — key outcomes and plain-language verdict.",
-    "Field Officer": "Simplified view — prediction outcome and actionable guidance.",
+    "Data Scientist":  "Full interface — all tabs, controls, and technical metrics.",
+    "Clinician":       "Clinical safety focus — sensitivity, equity, and patient impact.",
+    "Regulator":       "Compliance focus — fairness audit, governance, annotation trail.",
+    "Board Member":    "Executive summary — key outcomes and plain-language verdict.",
+    "Field Officer":   "Simplified view — prediction outcome and actionable guidance.",
 }
 
 _ROLE_ICONS = {
     "Data Scientist": "🔬",
-    "Clinician": "🩺",
-    "Regulator": "🏛️",
-    "Board Member": "📋",
-    "Field Officer": "🌿",
+    "Clinician":      "🩺",
+    "Regulator":      "🏛️",
+    "Board Member":   "📋",
+    "Field Officer":  "🌿",
 }
+
+
+
+# ── Domain-specific role & perspective configurations ─────────────────────────
+
+
+DOMAIN_ROLES: Dict[str, Dict[str, Dict]] = {
+
+    # ── Healthcare ─────────────────────────────────────────────────────────────
+    "health": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, technical metrics, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Best balance of speed, accuracy and feature importance for exploratory research.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "clinical": True,
+                    "feature_modules": True, "data_analysis": True, "xai": True,
+                    "compliance": True, "longitudinal": True, "federated": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3,
+                    "enable_governance": True, "enable_gender_audit": True},
+                "focus_metrics": ["accuracy", "fairness_score", "demographic_parity", "sensitivity"],
+            },
+            "Clinician": {
+                "icon": "🩺", "desc": "Clinical safety focus — sensitivity, equity gaps, and patient impact.",
+                "algo": "calibrated_hgb", "algo_label": "Calibrated HGB",
+                "algo_reason": "Calibrated probabilities give reliable risk scores for clinical triage decisions. Minimises false negatives.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": True, "clinical": True,
+                    "feature_modules": False, "data_analysis": False, "xai": True,
+                    "compliance": False, "longitudinal": False, "federated": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.2, "n_runs": 3,
+                    "enable_governance": True, "enable_gender_audit": True},
+                "focus_metrics": ["sensitivity", "fairness_score", "adv_lo", "gender_gap"],
+                "role_brief": "You are reviewing this AI triage system for clinical deployment. Your priority is: does it harm patients through missed diagnoses or unequal care?",
+            },
+            "Regulator": {
+                "icon": "🏛️", "desc": "Compliance audit — fairness report, governance, annotation trail.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Class weights enforce equal error rates across demographic groups — the regulatory gold standard for protected class fairness.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "clinical": False,
+                    "feature_modules": True, "data_analysis": False, "xai": True,
+                    "compliance": True, "longitudinal": True, "federated": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.1, "n_runs": 5,
+                    "enable_governance": True, "enable_gender_audit": True},
+                "focus_metrics": ["fairness_score", "demographic_parity", "equalized_odds"],
+                "role_brief": "You are conducting a NITDA/NHIA regulatory audit. Your priority is: does this AI meet the WHO fairness threshold of demographic parity gap < 0.10?",
+            },
+            "Hospital Manager": {
+                "icon": "🏥", "desc": "Executive view — KPI dashboard and plain-language policy verdict.",
+                "algo": "random_forest", "algo_label": "Random Forest",
+                "algo_reason": "Interpretable, robust, and widely understood by non-technical stakeholders. Easy to explain to hospital boards.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": False, "clinical": True,
+                    "feature_modules": False, "data_analysis": False, "xai": False,
+                    "compliance": True, "longitudinal": False, "federated": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.25, "n_runs": 1,
+                    "enable_governance": True, "enable_gender_audit": False},
+                "focus_metrics": ["accuracy", "fairness_score", "sensitivity"],
+                "role_brief": "You are deciding whether to deploy this AI in your hospital. Focus on: accuracy, cost of errors, and board-level fairness compliance.",
+            },
+            "Patient Advocate": {
+                "icon": "🤝", "desc": "Access equity — who is denied care and why, in plain language.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Fairness-weighted training directly reduces the denial gap for the most vulnerable patients.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": False, "equity": True, "clinical": True,
+                    "feature_modules": False, "data_analysis": False, "xai": True,
+                    "compliance": False, "longitudinal": False, "federated": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.4, "n_runs": 3,
+                    "enable_governance": False, "enable_gender_audit": True,
+                    "selected_biases": ["demographic", "gender", "socioeconomic"]},
+                "focus_metrics": ["adv_lo", "gender_gap", "demographic_parity"],
+                "role_brief": "You are advocating for patients denied care by this AI. Your focus: which groups are harmed most, and what would a fair system look like?",
+            },
+        },
+        "perspectives": ["Industry", "Research", "Policy Brief"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — accuracy, fairness score, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Policy Brief": "Plain-language summary for non-technical stakeholders.",
+        },
+    },
+
+    # ── Economic Justice ───────────────────────────────────────────────────────
+    "economic": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, technical metrics, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Handles mixed data types and missing values natively — ideal for Nigeria labour survey data.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "benchmarks": True, "impact": True, "longitudinal": True,
+                    "federated": True, "compliance": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3},
+                "focus_metrics": ["fairness_score", "gender_outcome_gap", "intersectional_worst_gap"],
+            },
+            "Labour Economist": {
+                "icon": "📊", "desc": "Wage gaps, informal sector bias, and automation displacement.",
+                "algo": "gradient_boosting", "algo_label": "Gradient Boosting (GBT)",
+                "algo_reason": "GBT captures non-linear wage suppression effects and interaction terms between gender × informality × geography.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "benchmarks": True, "impact": True, "longitudinal": True,
+                    "federated": False, "compliance": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.35, "n_runs": 5},
+                "focus_metrics": ["wage_suppression_index", "gender_outcome_gap", "informal_sector_gap"],
+                "role_brief": "You are analysing algorithmic wage discrimination. Your priority: quantify the wage gap between formal and informal workers, and between male and female workers in the same role.",
+            },
+            "Regulator (NITDA)": {
+                "icon": "🏛️", "desc": "NITDA / FCCPC compliance — fairness audit and regulatory verdict.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Mandatory for NITDA AI Policy 2023 compliance — fairness-weighted training is the regulatory benchmark.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "benchmarks": False, "impact": False, "longitudinal": False,
+                    "federated": False, "compliance": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.1, "n_runs": 5},
+                "focus_metrics": ["fairness_score", "demographic_parity", "equalized_odds"],
+                "role_brief": "You are conducting a NITDA algorithmic fairness audit under the Nigeria AI Policy 2023. Does this system meet the disparate impact threshold?",
+            },
+            "HR Director": {
+                "icon": "👔", "desc": "Hiring and wage-setting bias — gender, ethnicity, and income gaps.",
+                "algo": "random_forest", "algo_label": "Random Forest",
+                "algo_reason": "Feature importance clearly shows which CV attributes drive hiring decisions — auditable for HR compliance.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "benchmarks": True, "impact": False, "longitudinal": False,
+                    "federated": False, "compliance": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.25, "n_runs": 3},
+                "focus_metrics": ["gender_outcome_gap", "intersectional_worst_gap", "accuracy"],
+                "role_brief": "You are reviewing your company's AI hiring tool before the next FCCPC audit. Which protected attributes are driving rejection rates?",
+            },
+            "Trade Union Officer": {
+                "icon": "⚒️", "desc": "Worker impact — gig economy fairness, wage suppression index.",
+                "algo": "voting_soft", "algo_label": "Soft Voting Ensemble",
+                "algo_reason": "Ensemble reduces single-model bias — critical when presenting findings to arbitration boards where model reliability is challenged.",
+                "perspective": "Worker Impact",
+                "tab_visibility": {"performance": False, "equity": True, "xai": True,
+                    "benchmarks": True, "impact": True, "longitudinal": True,
+                    "federated": False, "compliance": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.45, "n_runs": 3,
+                    "selected_biases": ["socioeconomic", "geographic", "historical"]},
+                "focus_metrics": ["wage_suppression_index", "informal_sector_gap", "demographic_parity"],
+                "role_brief": "You are building an evidence base for wage discrimination arbitration. Show the economic harm in concrete terms: how much money do affected workers lose?",
+            },
+        },
+        "perspectives": ["Industry", "Research", "Worker Impact"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — fairness score, outcome gaps, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Worker Impact": "Focus on wage suppression, automation risk, and exclusion.",
+        },
+    },
+
+    # ── Judicial ───────────────────────────────────────────────────────────────
+    "judicial": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, technical metrics, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Fast iteration for research. Provides clean SHAP values for judicial fairness analysis.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "benchmarks": True, "compliance": True, "longitudinal": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3},
+                "focus_metrics": ["fairness_score", "racial_fpr_gap", "liberty_score"],
+            },
+            "Defence Counsel": {
+                "icon": "⚖️", "desc": "Defendant rights — false positive rate and intersectional bias.",
+                "algo": "calibrated_hgb", "algo_label": "Calibrated HGB",
+                "algo_reason": "Calibrated probabilities produce reliable risk scores. Overconfident models are especially dangerous in bail decisions.",
+                "perspective": "Rights Audit",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "benchmarks": True, "compliance": False, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.35, "n_runs": 3,
+                    "selected_biases": ["demographic", "historical", "socioeconomic"]},
+                "focus_metrics": ["racial_fpr_gap", "minority_fpr", "liberty_score"],
+                "role_brief": "You are challenging this predictive policing AI in court. Build the statistical evidence: is your client's demographic group flagged at a disproportionate rate?",
+            },
+            "Judicial Officer": {
+                "icon": "🔨", "desc": "Court oversight — bias audit, COMPAS comparison, liberty score.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Equal error rates across demographic groups is the legal standard. Balanced training is the minimum threshold for judicial admissibility.",
+                "perspective": "Rights Audit",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "benchmarks": True, "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.15, "n_runs": 5},
+                "focus_metrics": ["racial_fpr_gap", "liberty_score", "equalized_odds"],
+                "role_brief": "You are reviewing whether this AI meets the NJC standard for judicial AI fairness. The key threshold: FPR demographic gap must be below 10 percentage points.",
+            },
+            "Regulator (NJC)": {
+                "icon": "🏛️", "desc": "NJC / NASS compliance — fairness audit and due process verdict.",
+                "algo": "voting_soft", "algo_label": "Soft Voting Ensemble",
+                "algo_reason": "Ensemble models are more robust to individual model quirks — important for regulatory use where consistency matters.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "xai": False,
+                    "benchmarks": False, "compliance": True, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.1, "n_runs": 5},
+                "focus_metrics": ["fairness_score", "demographic_parity", "liberty_score"],
+            },
+            "Rights Monitor": {
+                "icon": "🌍", "desc": "Human rights focus — race, poverty, and geographic bias.",
+                "algo": "gradient_boosting", "algo_label": "Gradient Boosting",
+                "algo_reason": "GBT captures the interaction between race × poverty × geography — the intersectional harm pattern documented by Amnesty International.",
+                "perspective": "Rights Audit",
+                "tab_visibility": {"performance": False, "equity": True, "xai": True,
+                    "benchmarks": True, "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.5, "n_runs": 3,
+                    "selected_biases": ["demographic", "geographic", "historical", "socioeconomic"]},
+                "focus_metrics": ["racial_fpr_gap", "demographic_parity", "liberty_score"],
+                "role_brief": "You are documenting human rights violations by this predictive policing system for a UN Special Rapporteur report. Quantify the harm to marginalised communities.",
+            },
+        },
+        "perspectives": ["Industry", "Research", "Rights Audit"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — accuracy, fairness score, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Rights Audit": "Focus on defendant rights — false positive rates and liberty score.",
+        },
+    },
+
+    # ── National Security ──────────────────────────────────────────────────────
+    "security": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, adversarial attacks, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Robust to adversarial noise and data poisoning. Handles class imbalance in threat detection datasets.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": True,
+                    "compliance": True, "longitudinal": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3},
+                "focus_metrics": ["detection_rate", "liberty_score", "false_positive_rate"],
+            },
+            "Security Analyst": {
+                "icon": "🛡️", "desc": "Threat detection focus — detection rate, false alarm, liberty score.",
+                "algo": "voting_soft", "algo_label": "Soft Voting Ensemble",
+                "algo_reason": "Ensemble reduces false alarm rate (a critical operational metric) through model diversity — each model's false positives partially cancel out.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": True,
+                    "compliance": False, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.2, "n_runs": 3,
+                    "enable_redteam": True},
+                "focus_metrics": ["detection_rate", "false_positive_rate", "liberty_score"],
+                "role_brief": "You are deploying this threat detection AI. Your priority: maximise detection rate while keeping false alarm rate below 5%. What is the demographic toll?",
+            },
+            "Civil Liberties Officer": {
+                "icon": "⚖️", "desc": "Rights impact — demographic parity, false positive rate by group.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Equalised false positive rates across demographic groups is the civil liberties standard for surveillance AI.",
+                "perspective": "Rights Audit",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": False,
+                    "compliance": True, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.4, "n_runs": 3,
+                    "selected_biases": ["demographic", "geographic"]},
+                "focus_metrics": ["liberty_score", "false_positive_rate", "demographic_parity"],
+                "role_brief": "You are auditing this surveillance AI for civil liberties violations. The NSA requires liberty_score > 0.70. Is this system lawful?",
+            },
+            "Policy Maker": {
+                "icon": "🏛️", "desc": "Oversight focus — compliance report and governance layer.",
+                "algo": "random_forest", "algo_label": "Random Forest",
+                "algo_reason": "Interpretable to non-technical policymakers and parliamentary committees. SHAP values can be cited in policy briefs.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": False,
+                    "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.15, "n_runs": 3,
+                    "enable_governance": True},
+                "focus_metrics": ["liberty_score", "fairness_score", "detection_rate"],
+            },
+            "Field Intelligence": {
+                "icon": "🕵️", "desc": "Operational view — prediction outcome and scenario briefing.",
+                "algo": "gradient_boosting", "algo_label": "Gradient Boosting",
+                "algo_reason": "Fast, accurate, and robust to adversarial noise in field-collected intelligence data.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": False, "redteam": True,
+                    "compliance": False, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.25, "n_runs": 1},
+                "focus_metrics": ["detection_rate", "false_positive_rate", "accuracy"],
+            },
+        },
+        "perspectives": ["Industry", "Research", "Rights Audit"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — detection rate, fairness score, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Rights Audit": "Focus on civil liberties — false positive rates and liberty score.",
+        },
+    },
+
+    # ── Education ──────────────────────────────────────────────────────────────
+    "education": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, technical metrics, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Best performance on JAMB-style tabular data with mixed numeric and categorical features.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": True, "longitudinal": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3},
+                "focus_metrics": ["fairness_score", "demographic_parity", "accuracy"],
+            },
+            "Educator": {
+                "icon": "📚", "desc": "Equity focus — gender gap, urban-rural divide, coaching access bias.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Corrects for the urban coaching advantage that inflates scores for already-privileged students.",
+                "perspective": "Student Impact",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.35, "n_runs": 3,
+                    "selected_biases": ["geographic", "socioeconomic", "demographic"]},
+                "focus_metrics": ["demographic_parity", "gender_gap", "equity_gap"],
+                "role_brief": "You are a teacher in a rural LGA. Your students score identically on practice tests but get different AI admission scores. Show the urban-rural gap.",
+            },
+            "Regulator (NUC)": {
+                "icon": "🏛️", "desc": "NUC / JAMB compliance — fairness audit and accreditation standards.",
+                "algo": "calibrated_hgb", "algo_label": "Calibrated HGB",
+                "algo_reason": "Calibrated probabilities allow NUC to set defensible cut-off thresholds with known error rates.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "xai": False,
+                    "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.1, "n_runs": 5},
+                "focus_metrics": ["fairness_score", "demographic_parity", "accuracy"],
+            },
+            "School Principal": {
+                "icon": "🎓", "desc": "Institution view — student outcomes and admission fairness.",
+                "algo": "random_forest", "algo_label": "Random Forest",
+                "algo_reason": "Interpretable feature importance helps school leaders understand which student characteristics the AI penalises.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.25, "n_runs": 3},
+                "focus_metrics": ["accuracy", "fairness_score", "equity_gap"],
+            },
+            "Student Advocate": {
+                "icon": "🙋", "desc": "Access equity — who is excluded and why, in plain language.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Demonstrates what fair admissions would look like — the counterfactual that student advocates need.",
+                "perspective": "Student Impact",
+                "tab_visibility": {"performance": False, "equity": True, "xai": True,
+                    "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.5, "n_runs": 3,
+                    "selected_biases": ["demographic", "geographic", "socioeconomic"]},
+                "focus_metrics": ["demographic_parity", "equity_gap", "gender_gap"],
+                "role_brief": "You are fighting for students excluded by JAMB's AI scoring. Build the evidence: who is systematically excluded and what would fair scoring look like?",
+            },
+        },
+        "perspectives": ["Industry", "Research", "Student Impact"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — accuracy, fairness score, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Student Impact": "Focus on exclusion — which students bear the greatest harm.",
+        },
+    },
+
+    # ── Financial Inclusion ────────────────────────────────────────────────────
+    "financial": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, technical metrics, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Native handling of missing values in credit data. Best AUC on EFInA financial inclusion datasets.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": True, "longitudinal": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3},
+                "focus_metrics": ["fairness_score", "informal_sector_gap", "accuracy"],
+            },
+            "Credit Analyst": {
+                "icon": "💳", "desc": "Approval rates, denial gaps, and income-level bias.",
+                "algo": "gradient_boosting", "algo_label": "Gradient Boosting",
+                "algo_reason": "GBT captures non-linear income × employment interactions that drive credit score bias for informal workers.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3},
+                "focus_metrics": ["accuracy", "informal_sector_gap", "demographic_parity"],
+                "role_brief": "You are reviewing your bank's credit scoring AI before the CBN examination. Is your denial rate for informal sector applicants defensible?",
+            },
+            "Regulator (CBN)": {
+                "icon": "🏛️", "desc": "CBN / NDPC compliance — disparate impact ratio, ECOA alignment.",
+                "algo": "calibrated_hgb", "algo_label": "Calibrated HGB",
+                "algo_reason": "Calibration ensures the AI's risk scores are accurate across income groups — a CBN requirement for model validation.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "xai": False,
+                    "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.1, "n_runs": 5},
+                "focus_metrics": ["fairness_score", "demographic_parity", "informal_sector_gap"],
+            },
+            "Bank Director": {
+                "icon": "🏦", "desc": "Executive view — KPI dashboard and plain-language risk verdict.",
+                "algo": "random_forest", "algo_label": "Random Forest",
+                "algo_reason": "Explainable to board directors and auditors. Feature importance maps directly to credit policy levers.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": False, "xai": False,
+                    "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.2, "n_runs": 1},
+                "focus_metrics": ["accuracy", "fairness_score", "fpr"],
+            },
+            "Consumer Advocate": {
+                "icon": "🤝", "desc": "Borrower equity — informal sector exclusion and poverty trap risk.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Equal error rates across income groups prevents the poverty trap cycle where AI denials lock out the poor permanently.",
+                "perspective": "Consumer Impact",
+                "tab_visibility": {"performance": False, "equity": True, "xai": True,
+                    "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.5, "n_runs": 3,
+                    "selected_biases": ["socioeconomic", "demographic", "historical"]},
+                "focus_metrics": ["informal_sector_gap", "demographic_parity", "fpr"],
+                "role_brief": "You are representing informal workers denied credit. Show how the AI perpetuates the poverty trap: those who need credit most are denied at the highest rate.",
+            },
+        },
+        "perspectives": ["Industry", "Research", "Consumer Impact"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — approval gaps, fairness score, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Consumer Impact": "Focus on who is excluded — informal workers, low-income customers.",
+        },
+    },
+
+    # ── Disinformation ─────────────────────────────────────────────────────────
+    "disinformation": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, technical metrics, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Handles high-dimensional text features. Best F1 on Hausa/Yoruba/Igbo mixed-language corpora.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": True,
+                    "compliance": True, "longitudinal": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3,
+                    "enable_redteam": True},
+                "focus_metrics": ["accuracy", "fairness_score", "language_fpr_gap"],
+            },
+            "Platform Policy": {
+                "icon": "📡", "desc": "Moderation performance — precision, recall, language FPR gap.",
+                "algo": "voting_soft", "algo_label": "Soft Voting Ensemble",
+                "algo_reason": "Ensemble reduces language-specific FPR variance — critical for platform policy where a single language over-removal causes viral backlash.",
+                "perspective": "Industry",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": True,
+                    "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.25, "n_runs": 3,
+                    "enable_redteam": True},
+                "focus_metrics": ["accuracy", "language_fpr_gap", "speech_suppression_risk"],
+                "role_brief": "You are Meta's Nigeria policy lead 30 days before the 2027 election. Your moderation AI is flagging Hausa content at 24% higher rate. Fix it before election day.",
+            },
+            "Election Monitor": {
+                "icon": "🗳️", "desc": "Election integrity — speech suppression risk and language equity.",
+                "algo": "calibrated_hgb", "algo_label": "Calibrated HGB",
+                "algo_reason": "Calibrated probabilities allow INEC monitors to set defensible removal thresholds with known type-I error rates per language.",
+                "perspective": "Democracy Audit",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": False,
+                    "compliance": True, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 5,
+                    "selected_biases": ["linguistic", "demographic"]},
+                "focus_metrics": ["language_fpr_gap", "speech_suppression_risk", "fairness_score"],
+                "role_brief": "You are an INEC/EU election observer. Is this platform's moderation AI suppressing political speech in minority languages? Quantify the democratic harm.",
+            },
+            "Regulator (INEC)": {
+                "icon": "🏛️", "desc": "INEC / DSA compliance — content moderation fairness verdict.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "Equal removal rates across languages is the DSA Article 34 requirement. Balanced training is the standard solution.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "redteam": False,
+                    "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.1, "n_runs": 5},
+                "focus_metrics": ["fairness_score", "language_fpr_gap", "demographic_parity"],
+            },
+            "Journalist": {
+                "icon": "📰", "desc": "Press freedom focus — over-removal rate and political bias.",
+                "algo": "gradient_boosting", "algo_label": "Gradient Boosting",
+                "algo_reason": "GBT's partial dependence plots show exactly which linguistic features trigger removal — directly quotable in investigative reporting.",
+                "perspective": "Democracy Audit",
+                "tab_visibility": {"performance": False, "equity": True, "redteam": True,
+                    "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.45, "n_runs": 3,
+                    "selected_biases": ["linguistic", "historical", "demographic"]},
+                "focus_metrics": ["language_fpr_gap", "speech_suppression_risk", "over_removal_rate"],
+                "role_brief": "You are an investigative journalist for Stears or Premium Times. Prove that this platform's AI systematically suppresses Hausa and Yoruba political speech.",
+            },
+        },
+        "perspectives": ["Industry", "Research", "Democracy Audit"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — precision, recall, speech suppression, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Democracy Audit": "Focus on electoral fairness — language gaps and voter suppression risk.",
+        },
+    },
+
+    # ── Agrotech ───────────────────────────────────────────────────────────────
+    "agrotech": {
+        "roles": {
+            "Data Scientist": {
+                "icon": "🔬", "desc": "Full interface — all tabs, technical metrics, and benchmarks.",
+                "algo": "hist_gradient_boosting", "algo_label": "Hist Gradient Boosting",
+                "algo_reason": "Handles climate × soil × connectivity interactions natively. Best performance on Plateau State NASC calibrated data.",
+                "perspective": "Research",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": True, "longitudinal": True, "raw": True},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3},
+                "focus_metrics": ["fairness_score", "gender_outcome_gap", "demographic_parity"],
+            },
+            "Agronomist": {
+                "icon": "🌾", "desc": "Crop risk focus — climate, market access, and irrigation equity.",
+                "algo": "random_forest", "algo_label": "Random Forest",
+                "algo_reason": "Feature importance directly maps to agronomic variables (rainfall, soil type, distance to market) — interpretable to extension officers.",
+                "perspective": "Farmer Impact",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": False, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.3, "n_runs": 3,
+                    "selected_biases": ["geographic", "socioeconomic"]},
+                "focus_metrics": ["accuracy", "demographic_parity", "gender_outcome_gap"],
+                "role_brief": "You are a NASC agronomist reviewing AI crop advisory for Plateau State. Does the system recommend the same resources to female and male farmers with identical plots?",
+            },
+            "Regulator (NASC)": {
+                "icon": "🏛️", "desc": "NASC / NITDA compliance — fairness audit and SDG2 alignment.",
+                "algo": "balanced_hgb", "algo_label": "Balanced HGB (Fairness-Weighted)",
+                "algo_reason": "SDG2 (Zero Hunger) requires equitable resource distribution. Balanced training is the NASC standard for AI-assisted allocation.",
+                "perspective": "Policy Brief",
+                "tab_visibility": {"performance": True, "equity": True, "xai": False,
+                    "compliance": True, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.1, "n_runs": 5},
+                "focus_metrics": ["fairness_score", "gender_outcome_gap", "demographic_parity"],
+            },
+            "Extension Officer": {
+                "icon": "🌿", "desc": "Field view — farmer outcomes and actionable guidance.",
+                "algo": "decision_tree", "algo_label": "Decision Tree",
+                "algo_reason": "A single decision tree produces a rule-based output that extension officers can explain to farmers without a smartphone or internet.",
+                "perspective": "Farmer Impact",
+                "tab_visibility": {"performance": True, "equity": True, "xai": True,
+                    "compliance": False, "longitudinal": False, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.2, "n_runs": 1},
+                "focus_metrics": ["accuracy", "demographic_parity", "gender_outcome_gap"],
+                "role_brief": "You work with smallholder farmers in rural Plateau State. The AI recommends resources — but your female farmers say they receive fewer recommendations than men.",
+            },
+            "Gender Auditor": {
+                "icon": "👩‍🌾", "desc": "Gender equity — female farmer access and UNESCO SDG audit.",
+                "algo": "calibrated_hgb", "algo_label": "Calibrated HGB",
+                "algo_reason": "Calibrated probabilities allow precise measurement of the gender probability gap — required for UNESCO Women4EthicalAI certification.",
+                "perspective": "Farmer Impact",
+                "tab_visibility": {"performance": False, "equity": True, "xai": True,
+                    "compliance": True, "longitudinal": True, "raw": False},
+                "sidebar_defaults": {"bias_intensity": 0.4, "n_runs": 5,
+                    "enable_gender_audit": True,
+                    "selected_biases": ["gender", "demographic", "geographic"]},
+                "focus_metrics": ["gender_outcome_gap", "demographic_parity", "fairness_score"],
+                "role_brief": "You are conducting a UNESCO Women4EthicalAI audit. 52% of Nigerian farmers are women. Is this AI system certified to serve them equitably?",
+            },
+        },
+        "perspectives": ["Industry", "Research", "Farmer Impact"],
+        "perspective_help": {
+            "Industry": "KPI dashboard — fairness score, market access gaps, key alerts.",
+            "Research": "Full statistical depth — distributions, CIs, benchmarks.",
+            "Farmer Impact": "Focus on smallholder equity — gender, income, and connectivity gaps.",
+        },
+    },
+}
+
+
+# ── Helper: get domain from page name ─────────────────────────────────────────
+def _detect_domain(page_domain_hint: str) -> str:
+    """Map a hint string to a DOMAIN_ROLES key."""
+    mapping = {
+        "health":        "health",
+        "healthcare":    "health",
+        "economic":      "economic",
+        "econ":          "economic",
+        "security":      "security",
+        "education":     "education",
+        "edu":           "education",
+        "financial":     "financial",
+        "finance":       "financial",
+        "fin":           "financial",
+        "judicial":      "judicial",
+        "justice":       "judicial",
+        "disinformation":"disinformation",
+        "disinfo":       "disinformation",
+        "agrotech":      "agrotech",
+        "agro":          "agrotech",
+    }
+    return mapping.get(page_domain_hint.lower(), "health")
+
 
 
 def role_switcher(domain: str) -> None:
     """
-    Render a compact role/persona selector in the sidebar.
-    Stores the selected role in session state.
+    Render a domain-specific role/persona selector in the sidebar.
+    Shows roles relevant to the current module (e.g. Clinician for Healthcare,
+    Labour Economist for Economic Justice, Defence Counsel for Judicial).
 
     Call this FIRST in the sidebar, before any other controls.
     """
-    role_key = f"_active_role_{domain}"
-    if role_key not in st.session_state:
-        st.session_state[role_key] = "Data Scientist"
+    mapped = _detect_domain(domain)
+    cfg    = DOMAIN_ROLES.get(mapped, DOMAIN_ROLES["health"])
+    roles  = list(cfg["roles"].keys())
+
+    role_key = f"_active_role_{mapped}"
+    if role_key not in st.session_state or st.session_state[role_key] not in roles:
+        st.session_state[role_key] = roles[0]
 
     current = st.session_state[role_key]
 
     st.markdown(
-        "<p style='font-size:.78rem;font-weight:500;"
-        "color:var(--color-text-secondary);margin-bottom:3px;'>View as</p>",
+        "<p style='font-size:.78rem;font-weight:600;"
+        "color:var(--color-text-secondary);margin-bottom:3px;'>👁 View as</p>",
         unsafe_allow_html=True,
     )
 
     selected = st.selectbox(
         "Role",
-        list(ROLE_TAB_VISIBILITY.keys()),
-        index=list(ROLE_TAB_VISIBILITY.keys()).index(current),
-        format_func=lambda r: f"{_ROLE_ICONS.get(r, '')} {r}",
-        key=f"_role_select_{domain}",
+        roles,
+        index=roles.index(current) if current in roles else 0,
+        format_func=lambda r: (cfg.get("roles",{}).get(r,{}).get("icon","") + " " + r),
+        key=f"_role_select_{mapped}",
         label_visibility="collapsed",
     )
 
@@ -1536,9 +2125,10 @@ def role_switcher(domain: str) -> None:
         st.rerun()
 
     # Show description under the selector
+    desc = cfg["roles"].get(selected, {}).get("desc", "")
     st.markdown(
-        f"<p style='font-size:.75rem;color:var(--color-text-tertiary);"
-        f"margin:.1rem 0 0;'>{_ROLE_DESCRIPTIONS.get(selected, '')}</p>",
+        f"<p style='font-size:.72rem;color:var(--color-text-tertiary);"
+        f"font-style:italic;margin:.2rem 0 0;'>{desc}</p>",
         unsafe_allow_html=True,
     )
 
@@ -1546,6 +2136,105 @@ def role_switcher(domain: str) -> None:
 def get_active_role(domain: str) -> str:
     """Return the currently active role for the given domain."""
     return st.session_state.get(f"_active_role_{domain}", "Data Scientist")
+
+
+
+def get_role_config(domain: str) -> dict:
+    """Return the full config dict for the currently active role in a domain."""
+    mapped = _detect_domain(domain)
+    cfg    = DOMAIN_ROLES.get(mapped, DOMAIN_ROLES["health"])
+    roles  = cfg.get("roles", {})
+    active = get_active_role(mapped)
+    return roles.get(active, next(iter(roles.values()), {}))
+
+
+def get_role_algo(domain: str) -> tuple:
+    """
+    Return (algo_key, algo_label, algo_reason) for the active role.
+    algo_key maps to _build_clf() in pages that have an algorithm factory.
+    """
+    cfg = get_role_config(domain)
+    return (
+        cfg.get("algo",       "hist_gradient_boosting"),
+        cfg.get("algo_label", "Hist Gradient Boosting"),
+        cfg.get("algo_reason","Optimal for this role's analytical goals."),
+    )
+
+
+def get_role_tabs(domain: str) -> dict:
+    """Return the tab_visibility dict for the active role."""
+    cfg = get_role_config(domain)
+    return cfg.get("tab_visibility", {})
+
+
+def get_role_defaults(domain: str) -> dict:
+    """Return sidebar default values (bias_intensity, n_runs, etc.) for the active role."""
+    cfg = get_role_config(domain)
+    return cfg.get("sidebar_defaults", {})
+
+
+def get_role_brief(domain: str) -> str:
+    """Return the scenario brief / role framing text for the active role."""
+    cfg = get_role_config(domain)
+    return cfg.get("role_brief", "")
+
+
+def role_algo_banner(domain: str) -> None:
+    """
+    Render a compact algorithm recommendation card in the sidebar.
+    Shows the recommended algorithm for the active role with reasoning.
+    Placed just above the run button.
+    """
+    algo_key, algo_label, algo_reason = get_role_algo(domain)
+    role = get_active_role(_detect_domain(domain))
+
+    if role == "Data Scientist":
+        return  # Data Scientist chooses manually
+
+    st.markdown(
+        f"<div style='background:linear-gradient(135deg,#f0fdf4,#dcfce7);"
+        f"border:1px solid #86efac;border-left:4px solid #16a34a;"
+        f"border-radius:8px;padding:10px 12px;margin:8px 0;'>"
+        f"<p style='font-size:.68rem;font-weight:700;color:#166534;"
+        f"text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px;'>"
+        f"🤖 Recommended Algorithm</p>"
+        f"<p style='font-size:.82rem;font-weight:700;color:#0f172a;margin:0 0 4px;'>"
+        f"{algo_label}</p>"
+        f"<p style='font-size:.71rem;color:#374151;margin:0;line-height:1.4;'>"
+        f"{algo_reason}</p>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def role_brief_banner(domain: str) -> None:
+    """
+    Render a scenario brief / role framing banner below the page header.
+    Only shown for non-Data-Scientist roles that have a role_brief set.
+    """
+    brief = get_role_brief(domain)
+    if not brief:
+        return
+    role = get_active_role(_detect_domain(domain))
+    icon = _ROLE_ICONS.get(role, "👤")
+    mapped = _detect_domain(domain)
+    cfg  = DOMAIN_ROLES.get(mapped, {})
+    roles_cfg = cfg.get("roles", {})
+    role_cfg  = roles_cfg.get(role, {})
+    desc = role_cfg.get("desc", "")
+
+    st.markdown(
+        f"<div style='background:linear-gradient(135deg,#1e3a5f,#0c4a6e);"
+        f"border-radius:10px;padding:12px 16px;margin:0 0 14px;'>"
+        f"<p style='color:#7dd3fc;font-size:.68rem;font-weight:700;"
+        f"letter-spacing:.08em;text-transform:uppercase;margin:0 0 4px;'>"
+        f"{icon} YOUR ROLE: {role.upper()}</p>"
+        f"<p style='color:#f1f5f9;font-size:.88rem;font-weight:500;"
+        f"margin:0 0 6px;line-height:1.4;'>{brief}</p>"
+        f"<p style='color:#94a3b8;font-size:.73rem;margin:0;font-style:italic;'>{desc}</p>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def role_banner(domain: str) -> None:
@@ -1558,9 +2247,9 @@ def role_banner(domain: str) -> None:
         return  # No banner needed for full view
 
     role_key = f"_active_role_{domain}"
-    icon = _ROLE_ICONS.get(role, "👤")
-    domain_colors = {"health": "#2980b9", "security": "#c0392b", "agrotech": "#27ae60"}
-    color = domain_colors.get(domain, "#8e44ad")
+    icon      = _ROLE_ICONS.get(role, "👤")
+    domain_colors = {"health":"#2980b9","security":"#c0392b","agrotech":"#27ae60"}
+    color     = domain_colors.get(domain, "#8e44ad")
 
     st.markdown(
         f"<div style='background:var(--color-background-secondary);"
@@ -1577,19 +2266,19 @@ def role_banner(domain: str) -> None:
 
 
 def board_member_summary(
-        domain: str,
-        avg_accuracy: float,
-        avg_fairness: float,
-        compliant: bool,
-        key_finding: str,
-        recommendation: str,
+    domain: str,
+    avg_accuracy: float,
+    avg_fairness: float,
+    compliant: bool,
+    key_finding: str,
+    recommendation: str,
 ) -> None:
     """
     Render an executive-level summary card for the Board Member role.
     Replaces the full dashboard with a concise 4-item verdict.
     """
-    domain_colors = {"health": "#2980b9", "security": "#c0392b", "agrotech": "#27ae60"}
-    color = domain_colors.get(domain, "#8e44ad")
+    domain_colors = {"health":"#2980b9","security":"#c0392b","agrotech":"#27ae60"}
+    color  = domain_colors.get(domain, "#8e44ad")
     status = "✅ READY FOR REVIEW" if compliant and avg_fairness >= 0.7 else "⚠️ REQUIRES ATTENTION"
     st_col = "#27ae60" if "READY" in status else "#e74c3c"
 

@@ -9,6 +9,8 @@ Light-mode design. Research-grade metadata with citations.
 import re
 import streamlit as st
 import pandas as pd
+from components.translate import install_auto_translate, tx, tx_plotly
+install_auto_translate()
 
 from components.governance_logic import (
     COMMUNITY_SCENARIOS,
@@ -41,11 +43,11 @@ DOMAIN_META = {
     "healthcare":        {"icon":"🏥","label":"Healthcare","color":"#0891b2","page":"02_Healthcare_Equity"},
     "national_security": {"icon":"🛡️","label":"Security",  "color":"#dc2626","page":"2_National_Security"},
     "agrotech":          {"icon":"🌾","label":"Agrotech",  "color":"#16a34a","page":"3_Sustainable_Agrotech"},
-    "education":         {"icon":"🎓","label":"Education", "color":"#d97706","page":"Education_equity"},
+    "education":         {"icon":"🎓","label":"Education", "color":"#d97706","page":"Education_Equity"},
     "finance":           {"icon":"💰","label":"Finance",   "color":"#0d9488","page":"Financial_Inclusion"},
     "judicial":          {"icon":"⚖️","label":"Judicial",  "color":"#7c3aed","page":"Judicial_system"},
     "disinformation":    {"icon":"📡","label":"Disinfo",   "color":"#ea580c","page":"Disinformation_Misinformation"},
-    "economic":          {"icon":"💼","label":"Economic",  "color":"#b45309","page":"11_Economic_Justice"},
+    "economic":          {"icon":"💼","label":"Economic",  "color":"#b45309","page":"Economic_Justice"},
 }
 
 SEV_COLOR = {
