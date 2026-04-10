@@ -1,6 +1,6 @@
 # components/governance_logic.py
 """
-GAGS Resilience Framework — Core Governance & Simulation Logic  v3.0
+GAGS Resilience Framework — Core Governance & Simulation Logic  v1.0
 =====================================================================
 
 Public API (imported by all page modules)
@@ -1761,7 +1761,7 @@ def run_simple_simulation(
 # §15  EXPLAINABLE AI (XAI) MODULE
 # ═══════════════════════════════════════════════════════════════════════════════
 """
-XAI layer for GAGS v3.0 — no external dependencies (sklearn only).
+XAI layer for GAGS v1.0 — no external dependencies (sklearn only).
 
 Provides:
   ExplainableModel          — wrapper that trains a model and attaches all
@@ -2673,7 +2673,7 @@ def generate_compliance_report(
             "nigeria_ready": _pass_fail(nitda_passed >= 5),
             "checks":     {k: _pass_fail(v) for k, v in nitda_checks.items()},
             "note": ("Capacity building component (training for local practitioners) "
-                     "is recommended but not yet implemented in GAGS v3.0."),
+                     "is recommended but not yet implemented in GAGS v1.0."),
         }
 
     # ── UNESCO Recommendation on Ethics of AI ────────────────────────────────
