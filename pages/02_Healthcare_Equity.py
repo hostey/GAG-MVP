@@ -1,6 +1,7 @@
 # pages/1_🏥_Healthcare_Equity.py
 """
-Healthcare Equity Simulation — GAGS Framework v3.0
+Healthcare Equity Simulation — GAGS Framework v1
+.0
 
 Refactored to integrate all five new feature modules from simulation_core.py:
   Feature 1 — AI Agent Economy Sandbox  (resource auction in healthcare domain)
@@ -90,7 +91,13 @@ from components.gags_interactive import (
     what_if_explorer, bias_detective_panel, track_run, award_points,
     _reset_render_guards
 )
+from components.healthcare_real_models import (
+    run_real_model_comparison,
+    render_real_model_tab,
+    real_model_sidebar_controls,
+)
 _reset_render_guards()
+
 from components.ai_safety import run_ai_safety_suite
 from components.gags_lifecycle import run_lifecycle_suite
 from components.gags_lifecycle_ui import render_lifecycle_tab, render_eco_tab
@@ -291,7 +298,8 @@ _STATE_DEFAULTS = {
     "health_longitudinal":     None,
     "health_federated":        None,
     "health_snapshot_history": [],
-    "health_ds_report": {}
+    "health_ds_report": {},
+    "health_real_models":      {},
 }
 for _k, _v in _STATE_DEFAULTS.items():
     if _k not in st.session_state:
@@ -583,7 +591,9 @@ with st.sidebar:
     enable_agent_economy= st.toggle("Agent Economy",         value=False)
     enable_gender_audit = st.toggle("Gender Equity Audit",   value=True)
     st.divider()
-
+    # ── Real Model Comparison controls ─────────────────────────────────────
+    _real_model_cfg = real_model_sidebar_controls()
+    st.divider()
     col_r, col_x = st.columns(2)
     run_button = col_r.button("🏥 Run", type="primary", use_container_width=True)
     if col_x.button(t("reset"), use_container_width=True):
@@ -598,7 +608,7 @@ with st.sidebar:
 
 
 st.markdown(
-    f"""<div class="page-header" style="--ac:#0891b2;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#0891b2;opacity:.55;display:inline-block;"></span>HEALTHCARE · GAGS v3.0 · Nigeria</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Healthcare Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">Test AI diagnostic bias across income, gender, and insurance status — real UCI/PIMA datasets calibrated to Nigeria demographics.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">UCI Heart Disease</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">PIMA Diabetes</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Nigeria Scenarios</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">WHO AI Ethics</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Gender Equity Audit</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Multilingual</span></div></div>""",
+    f"""<div class="page-header" style="--ac:#0891b2;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#0891b2;opacity:.55;display:inline-block;"></span>HEALTHCARE · GAGS v1.0 · Nigeria</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">Healthcare Equity Simulation</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">Test AI diagnostic bias across income, gender, and insurance status — real UCI/PIMA datasets calibrated to Nigeria demographics.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">UCI Heart Disease</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">PIMA Diabetes</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Nigeria Scenarios</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">WHO AI Ethics</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Gender Equity Audit</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#0891b2;">Multilingual</span></div></div>""",
     unsafe_allow_html=True
 )
 
@@ -661,9 +671,25 @@ if run_button:
             for w in result.get("warnings", []):
                 st.warning(f"⚠️ {w}", icon="⚠️")
 
-
-
-
+        # ── Real Model Comparison (runs once per button press) ─────────────────
+    if any([
+        _real_model_cfg["enable_datasets"],
+        _real_model_cfg["enable_huggingface"],
+        _real_model_cfg["enable_apis"],
+    ]):
+        with st.spinner("Running real model pipelines…"):
+            st.session_state["health_real_models"] = run_real_model_comparison(
+                n_samples=sample_size,
+                enable_datasets=_real_model_cfg["enable_datasets"],
+                enable_huggingface=_real_model_cfg["enable_huggingface"],
+                enable_apis=_real_model_cfg["enable_apis"],
+                dataset_sources=_real_model_cfg["dataset_sources"],
+                hf_sources=_real_model_cfg["hf_sources"],
+                api_sources=_real_model_cfg["api_sources"],
+                model_type=_real_model_cfg["model_type"],
+            )
+    else:
+        st.session_state.setdefault("health_real_models", {})
     # ── Run enabled feature modules (results stored per-session) ──────
     if "health_feature_outputs" not in st.session_state:
         st.session_state["health_feature_outputs"] = {}
@@ -1049,8 +1075,43 @@ if st.session_state.health_run_history:
     "🌱 Eco Score",
         "🔮 Dynamic Systems"
     ]
+    if st.session_state.get("health_real_models"):
+        if "🔬 Real Models" not in _tab_labels:
+            _tab_labels = list(_tab_labels) + ["🔬 Real Models"]
     _tabs_obj = st.tabs(_tab_labels)
     T = {n: _tab for n, _tab in zip(_tab_labels, _tabs_obj)}
+
+    if "🔬 Real Models" in T:
+        with T["🔬 Real Models"]:
+            _real_results = st.session_state.get("health_real_models", {})
+            _last_synth = (st.session_state.health_run_history[-1]
+                           if st.session_state.health_run_history else None)
+            if _real_results:
+                render_real_model_tab(_real_results, synthetic_result=_last_synth)
+            else:
+                st.info(
+                    "Enable at least one pipeline in the sidebar under "
+                    "**🔬 Real Model Comparison** and click **🏥 Run**."
+                )
+                col_a, col_b, col_c = st.columns(3)
+                col_a.markdown("""
+    **🇳🇬 Pipeline A — Datasets**
+    - Nigeria DHS 2018 calibrated
+    - NHIA claims proxy
+    - WHO AFRO UHC blend
+    """)
+                col_b.markdown("""
+    **🤗 Pipeline B — HuggingFace LLMs**
+    - ClinicalBERT (MIMIC-III)
+    - AfroXLM-R (Hausa/Yoruba/Igbo)
+    - Set `HUGGINGFACE_API_TOKEN`
+    """)
+                col_c.markdown("""
+    **🌐 Pipeline C — External APIs**
+    - OpenAI GPT-4o (JSON mode)
+    - Google Cloud Healthcare NLP
+    - Set `OPENAI_API_KEY`
+    """)
 
     # ── Tab 1: Performance ────────────────────────────────────────────────────
     with T["📈 Performance"]:
@@ -1666,7 +1727,7 @@ else:
     st.markdown("## 🏥 Welcome to Healthcare Equity Simulation")
     st.markdown("""
     Configure your scenario in the sidebar and click **Run** to begin.
-    This module integrates all five GAGS v3.0 feature upgrades alongside the
+    This module integrates all five GAGS v1.0 feature upgrades alongside the
     existing hybrid data pipeline.
     """)
 
@@ -1702,7 +1763,7 @@ else:
 st.divider()
 st.markdown("""
 <div style="text-align:center;color:#7f8c8d;padding:1.5rem 0;">
-    <strong>🏥 Healthcare Equity Simulation • GAGS Framework v3.0</strong><br>
+    <strong>🏥 Healthcare Equity Simulation • GAGS Framework v1.0</strong><br>
     Features: AI Agent Economy · Multimodal Red Teaming · Africa-Centric/Gender Equity ·
     Hybrid Governance · Strategic Social Reasoning
 </div>
