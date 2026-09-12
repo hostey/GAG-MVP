@@ -145,7 +145,7 @@ DOMAINS = [
          desc="AI fairness for Nigeria smallholder farmers. Gender audit (52% female), Vickrey auction, USSD mode.",
          pills=["Gender Audit","Agent Economy","USSD","52% Female"],
          metrics=["Crop Risk","Market Access","Gender Gap"]),
-    dict(icon="🎓", title="Education Equity", accent="#f59e0b", page="pages/Education_Equity.py",
+    dict(icon="🎓", title="Education Equity", accent="#f59e0b", page="pages/Education_Equity.py", label = "Education_Equity.py",
          desc="JAMB/WAEC examination bias, dropout prediction, automated essay grading. SES & urban-rural gaps.",
          pills=["JAMB/WAEC","Dropout Risk","SES Gap","Language Bias"],
          metrics=["Opportunity Gap","Gender Gap","SES Gap"]),

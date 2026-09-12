@@ -2,6 +2,7 @@
 streamlit>=1.28.0
 pydantic>=2.5.0
 python-dotenv>=1.0.0
+datasets
 
 # Machine Learning
 torch>=2.0.0
