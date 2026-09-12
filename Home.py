@@ -3,17 +3,40 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime
 from components.translate import install_auto_translate, tx, tx_plotly
+
+from components.live_data import fetch_nigeria_national_live
+from components.gags_interactive import render_interactive_healthcare
+
 install_auto_translate()
 
+# 1. FIXED: Set page config ONLY ONCE at the top
 st.set_page_config(
     page_title="GAGS · AI Governance Framework",
-    page_icon="⚖️", layout="wide",
-    initial_sidebar_state="collapsed",
+    page_icon="⚖️",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+# Add custom global CSS for polished metric cards & tabs
+st.markdown("""
+    <style>
+    /* Styled Metric Cards */
+    div[data-testid="stMetric"] {
+        background-color: #F9FAFB;
+        border: 1px solid #E5E7EB;
+        border-radius: 10px;
+        padding: 12px 16px;
+    }
+    /* Tab Styling */
+    button[data-baseweb="tab"] {
+        font-size: 0.95rem;
+        font-weight: 600;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Suppress any stale guided tour banners from other pages
-for _stale_key in ["_tour_dismissed_agrotech", "_tour_dismissed_health",
-                    "_tour_dismissed_security"]:
+for _stale_key in ["_tour_dismissed_agrotech", "_tour_dismissed_health", "_tour_dismissed_security"]:
     if _stale_key not in st.session_state:
         st.session_state[_stale_key] = True   # auto-dismiss on non-home pages
 

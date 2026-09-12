@@ -197,63 +197,147 @@ def render_mdp(mdp: dict, domain: str) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_information_theory(info: dict, domain: str) -> None:
-    _theory_header("📡", "Information-Theoretic Fairness",
-                   "Shannon (1948) · Dwork et al. (2012) · Ghassami et al. (2018)", C_ORANGE)
+    """
+    Renders Information-Theoretic Fairness metrics.
+    Core quantities: Mutual Information I(Ŷ;A), Normalised MI, KL-divergence,
+    and a composite Info Fairness Score.
+    """
+    _theory_header(
+        "📡",
+        "Information-Theoretic Fairness",
+        "Shannon (1948) · Dwork et al. (2012) · Ghassami et al. (2018)",
+        C_ORANGE,
+    )
 
-    if not info:
+    if not info or not isinstance(info, dict):
         st.info("Information-theoretic metrics not computed.")
         return
 
-    st.markdown(f"*{info.get('interpretation', '')}*")
+    # ── Safe extraction ──────────────────────────────────────────────────────
+    mi   = float(info.get("mutual_information", 0) or 0)
+    nmi  = float(info.get("normalised_mi", 0) or 0)
+    kl   = float(info.get("kl_divergence", 0) or 0)
+    ifs  = float(info.get("info_fairness_score", 0) or 0)
+    h_y  = float(info.get("prediction_entropy", 0) or 0)
+    h_ya = float(info.get("conditional_entropy", 0) or 0)
 
+    interpretation = info.get("interpretation", "")
+    if interpretation:
+        st.markdown(f"*{interpretation}*")
+
+    # ── Headline metrics ─────────────────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)
-    mi    = info.get("mutual_information", 0)
-    nmi   = info.get("normalised_mi", 0)
-    kl    = info.get("kl_divergence", 0)
-    ifs   = info.get("info_fairness_score", 0)
 
-    c1.metric("Mutual Information I(Ŷ;A)", f"{mi:.4f} bits",
-              help="Bits of information about sensitive attribute in prediction. 0 = perfect fairness.")
-    c2.metric("Normalised MI",  f"{nmi:.4f}",
-              delta_color="inverse")
-    c3.metric("KL-Divergence",  f"{kl:.4f}",
-              help="Statistical distance between group outcome distributions")
-    c4.metric("Info Fairness Score", f"{ifs:.3f}",
-              delta_color="normal")
+    c1.metric(
+        "Mutual Information I(Ŷ;A)",
+        f"{mi:.4f} bits",
+        help="Bits of information about the sensitive attribute contained in the prediction. 0 = perfect statistical independence."
+    )
+    c2.metric(
+        "Normalised MI",
+        f"{nmi:.4f}",
+        help="Mutual information scaled to [0, 1]. Easier to compare across tasks."
+    )
+    c3.metric(
+        "KL-Divergence",
+        f"{kl:.4f}",
+        help="Statistical distance between outcome distributions of different groups."
+    )
+    c4.metric(
+        "Info Fairness Score",
+        f"{ifs:.3f}",
+        help="Composite score (higher is fairer). Typically 1 − normalised MI."
+    )
 
+    # ── Plain-language guidance ──────────────────────────────────────────────
+    if mi < 0.01:
+        st.success(
+            "✅ Very low leakage — predictions carry almost no information about the sensitive attribute."
+        )
+    elif mi < 0.05:
+        st.info(
+            "ℹ️ Low-to-moderate leakage. Generally acceptable for screening tasks; "
+            "review carefully for high-stakes clinical decisions."
+        )
+    else:
+        st.warning(
+            "⚠️ Notable information leakage detected. "
+            "Consider adversarial debiasing, reweighting, or fairness constraints."
+        )
+
+    # ── Visualisations ───────────────────────────────────────────────────────
     col_left, col_right = st.columns(2)
 
     with col_left:
-        # Entropy decomposition chart
-        h_y  = info.get("prediction_entropy", 0)
-        h_ya = info.get("conditional_entropy", 0)
-        fig  = go.Figure(go.Bar(
-            x=["H(Ŷ) — Total Entropy", "H(Ŷ|A) — Cond. Entropy", "I(Ŷ;A) — Mutual Info"],
-            y=[h_y, h_ya, mi],
-            marker_color=[C_ORANGE, C_CYAN, C_RED],
-            text=[f"{v:.4f}" for v in [h_y, h_ya, mi]],
-            textposition="outside"))
-        fig.update_layout(title="Entropy Decomposition (bits)",
-                          height=260, margin=dict(t=40, b=30),
-                          paper_bgcolor="rgba(0,0,0,0)",
-                          yaxis_title="Bits")
+        # Entropy decomposition
+        fig = go.Figure(
+            go.Bar(
+                x=["H(Ŷ) — Total Entropy", "H(Ŷ|A) — Cond. Entropy", "I(Ŷ;A) — Mutual Info"],
+                y=[h_y, h_ya, mi],
+                marker_color=[C_ORANGE, C_CYAN, C_RED],
+                text=[f"{v:.4f}" for v in [h_y, h_ya, mi]],
+                textposition="outside",
+            )
+        )
+        fig.update_layout(
+            title="Entropy Decomposition (bits)",
+            height=280,
+            margin=dict(t=40, b=30, l=20, r=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            yaxis_title="Bits",
+            showlegend=False,
+        )
         st.plotly_chart(fig, use_container_width=True, key=f"_info_entropy_{domain}")
 
     with col_right:
-        # Data Shapley
+        # Data Shapley / group contribution
         shapley = info.get("data_shapley", {})
-        if shapley:
+        if shapley and isinstance(shapley, dict):
             st.markdown("**Data Shapley — Group Value Attribution**")
-            st.caption("How much each group's data contributes to overall model performance")
-            for g, val in shapley.items():
-                col   = C_GREEN if val >= 0 else C_RED
-                label = f"Group {g} ({'Advantaged' if int(g) == 1 else 'Disadvantaged'})"
+            st.caption(
+                "Estimated contribution of each group's data to overall model performance."
+            )
+
+            # Sort by absolute contribution for clearer display
+            sorted_items = sorted(
+                shapley.items(),
+                key=lambda x: abs(float(x[1])),
+                reverse=True,
+            )
+
+            for g, val in sorted_items:
+                val = float(val)
+                colour = C_GREEN if val >= 0 else C_RED
+
+                # Flexible group labelling
+                try:
+                    g_int = int(g)
+                    label = f"Group {g} ({'Advantaged' if g_int == 1 else 'Disadvantaged'})"
+                except (ValueError, TypeError):
+                    label = f"Group {g}"
+
                 st.markdown(
                     f"<div style='display:flex;justify-content:space-between;"
-                    f"padding:4px 10px;border-bottom:1px solid #f1f5f9;font-size:.82rem;'>"
+                    f"padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:.83rem;'>"
                     f"<span>{label}</span>"
-                    f"<b style='color:{col};'>{val:+.4f}</b></div>",
-                    unsafe_allow_html=True)
+                    f"<b style='color:{colour};'>{val:+.4f}</b></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("Data Shapley values not available for this run.")
+
+    # ── Optional expander for non-technical readers ──────────────────────────
+    with st.expander("What does this mean for patients?", expanded=False):
+        st.markdown(
+            """
+            - **Mutual Information ≈ 0** → The model’s prediction does not reveal 
+              whether a patient belongs to a sensitive group (e.g., rural, low-income, female).
+            - **Higher Mutual Information** → The model is (intentionally or unintentionally) 
+              using group membership as a signal. This can produce unequal under-diagnosis rates.
+            - In clinical settings we usually want **very low** mutual information 
+              between the prediction and protected attributes, especially for high-stakes decisions.
+            """
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

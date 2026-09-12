@@ -49,32 +49,74 @@ def _card(title: str, value: str, sub: str, colour: str) -> None:
 # LIFECYCLE TAB
 # ══════════════════════════════════════════════════════════════════════════════
 
-def render_lifecycle_tab(lifecycle_report: dict, domain: str) -> None:
-    if not lifecycle_report or not lifecycle_report.get("pillars"):
-        st.markdown("""
-        <div style='background:#f8fafc;border:2px dashed #e2e8f0;border-radius:12px;
-        padding:32px;text-align:center;'>
-        <p style='font-size:2rem;margin:0 0 8px;'>🔄</p>
-        <p style='font-weight:700;color:#374151;'>Lifecycle Analysis Not Run</p>
-        <p style='color:#6b7280;font-size:.85rem;'>Enable <strong>🔄 Lifecycle Management</strong>
-        in the sidebar and run the simulation.</p></div>""", unsafe_allow_html=True)
-        return
+# Inside components/gags_lifecycle_ui.py
+
+def render_lifecycle_tab(domain_key: str = "health", lifecycle_report: dict | str | None = None) -> None:
+    """
+    Renders the Model Lifecycle Management diagnostic component:
+    - Model Registry
+    - Continuous Monitoring & Drift Detection
+    - Compliance Audit Certificate
+    """
+    # ── 1. State Retrieval & Input Normalisation ──────────────────────────────
+    # Auto-resolve from st.session_state if report is not passed explicitly
+    if lifecycle_report is None:
+        lifecycle_report = st.session_state.get(
+            f"{domain_key}_lifecycle_report",
+            st.session_state.get("health_lifecycle_report", {})
+        )
+
+    if isinstance(lifecycle_report, str):
+        try:
+            import json
+            lifecycle_report = json.loads(lifecycle_report)
+        except Exception:
+            lifecycle_report = {}
+
+    if not isinstance(lifecycle_report, dict):
+        lifecycle_report = {}
 
     pillars = lifecycle_report.get("pillars", {})
+
+    # ── 2. Empty State Fallback ────────────────────────────────────────────────
+    if not pillars:
+        st.info(
+            "⚠️ **No Lifecycle Report Available**\n\n"
+            "Enable **Lifecycle Management** under *Analytical Modules* in the sidebar and run the simulation."
+        )
+        return
+
+    # ── 3. Component Header ───────────────────────────────────────────────────
+    # Uses Streamlit subheader instead of raw H2 for clean container/expander nesting
+    st.subheader("🔄 Model Lifecycle Management")
+    st.caption(
+        f"Domain: **{domain_key.replace('_', ' ').title()}** | "
+        "Registry · Continuous Monitoring · Regulatory Audit"
+    )
+
+    # ── 4. Sub-Tab Diagnostics ────────────────────────────────────────────────
     tab_reg, tab_mon, tab_audit = st.tabs([
-        "📦 Model Registry", "📡 Continuous Monitoring", "📜 Audit Certificate"
+        "📦 Model Registry",
+        "📡 Continuous Monitoring",
+        "📜 Compliance Audit"
     ])
 
     with tab_reg:
-        _render_registry(pillars.get("registry", {}), domain)
+        _render_registry(
+            reg=pillars.get("registry", {}),
+            domain=domain_key
+        )
 
     with tab_mon:
-        _render_monitoring(pillars.get("monitoring", {}), domain)
+        _render_monitoring(
+            mon=pillars.get("monitoring", {}),
+            domain=domain_key
+        )
 
     with tab_audit:
-        _render_audit(pillars.get("audit", {}))
-
-
+        _render_audit(
+            audit=pillars.get("audit", {})
+        )
 # ── Model Registry ────────────────────────────────────────────────────────────
 
 def _render_registry(reg: dict, domain: str) -> None:

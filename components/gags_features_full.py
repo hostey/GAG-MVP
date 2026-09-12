@@ -7,6 +7,9 @@ Fully implemented UI for:
   Feature 5  — Strategic Social Arena  (payoff matrix, round evolution, coalition)
 """
 from __future__ import annotations
+
+import datetime
+import json
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -128,69 +131,90 @@ DOMAIN_AGENT_PROFILES: Dict[str, List[Dict]] = {
 }
 
 
-def run_agent_economy_simulation(domain: str, n_rounds: int = 4) -> dict:
-    """Run a rich agent economy simulation with domain-specific agents."""
-    from components.governance_logic import AgentEconomySandbox, EconomyAgent
+def run_agent_economy_simulation(
+    domain: str = "security",
+    n_rounds: int = 6,
+    custom_profiles: list = None,
+    custom_resources: list = None,
+    allocation_mechanism: str = "Vickrey"
+) -> dict:
+    """Fully user-driven simulation with multiple allocation strategies"""
+    try:
+        from components.governance_logic import AgentEconomySandbox
+    except ImportError:
+        return {"error": "Sandbox module not found"}
 
-    profiles = DOMAIN_AGENT_PROFILES.get(domain, DOMAIN_AGENT_PROFILES["health"])
-    resources_by_domain = {
-        "health": ["icu_beds", "diagnostic_compute", "drug_supply", "specialist_time"],
-        "agrotech": ["irrigation_water", "fertilizer_quota", "drone_hours", "market_access"],
-        "security": ["satellite_bandwidth", "analyst_hours", "sensor_data", "response_units"],
-        "financial": ["credit_slots", "compute_time", "data_labels", "ad_impressions"],
-    }
-    resources = resources_by_domain.get(domain, resources_by_domain["health"])
+    profiles = custom_profiles or []
+    resources = custom_resources or ["satellite_bandwidth", "analyst_hours", "sensor_data", "response_units"]
+
+    if not profiles:
+        return {"error": "No agents defined"}
 
     sandbox = AgentEconomySandbox(domain=domain, n_agents=len(profiles))
-    # Override with domain-specific agents
+
+    # Apply profiles
     for i, agent in enumerate(sandbox.agents):
         if i < len(profiles):
             p = profiles[i]
-            agent.name = p["name"]
-            agent.budget = float(p["budget"])
-            agent.strategy = p["strategy"]
+            agent.name = p.get("name", f"Entity_{i+1}")
+            agent.budget = float(p.get("budget", 200000))
+            agent.strategy = p.get("strategy", "honest")
 
-    # Run auction rounds
     auction_log = []
-    for _round in range(n_rounds):
-        for resource in resources:
-            result = sandbox.run_auction_round(resource)
-            auction_log.append({**result, "round": _round + 1})
 
+    for rnd in range(n_rounds):
+        for resource in resources:
+            try:
+                if allocation_mechanism == "Vickrey":
+                    result = sandbox.run_auction_round(resource)  # Existing Vickrey
+                elif allocation_mechanism == "English":
+                    result = sandbox.run_english_auction(resource)  # Assume you implement this
+                elif allocation_mechanism == "First_Price":
+                    result = sandbox.run_first_price_auction(resource)
+                elif allocation_mechanism == "Proportional_Fair":
+                    result = sandbox.run_proportional_fair_allocation(resource)
+                elif allocation_mechanism == "Priority_Weighted":
+                    result = sandbox.run_priority_weighted_allocation(resource)
+                else:
+                    result = sandbox.run_auction_round(resource)
+
+                result["round"] = rnd + 1
+                result["mechanism"] = allocation_mechanism
+                auction_log.append(result)
+            except Exception as e:
+                auction_log.append({"resource": resource, "round": rnd + 1, "error": str(e)})
+
+    # Metrics
     spends = [a.total_spent for a in sandbox.agents]
     gini = _compute_gini(spends)
 
-    # Build rich agent summary
     agent_summary = []
     for i, a in enumerate(sandbox.agents):
         p = profiles[i] if i < len(profiles) else {}
         agent_summary.append({
-            "icon": p.get("icon", "🤖"),
+            "icon": p.get("icon", "🔒"),
             "name": a.name,
-            "strategy": a.strategy,
-            "initial_budget": float(profiles[i]["budget"]) if i < len(profiles) else 300.0,
-            "budget_remaining": round(a.budget, 2),
-            "total_spent": round(a.total_spent, 2),
-            "wins": a.wins,
-            "reputation": round(a.reputation, 3),
-            "win_rate": round(a.wins / max(len(auction_log), 1), 3),
-            "spend_share": round(a.total_spent / max(sum(spends), 1), 3),
+            "strategy": getattr(a, 'strategy', 'unknown'),
+            "initial_budget": float(p.get("budget", 0)),
+            "budget_remaining": round(getattr(a, 'budget', 0), 2),
+            "total_spent": round(getattr(a, 'total_spent', 0), 2),
+            "wins": getattr(a, 'wins', 0),
+            "reputation": round(getattr(a, 'reputation', 0), 3),
         })
 
     return {
         "domain": domain,
         "n_rounds": n_rounds,
+        "mechanism": allocation_mechanism,
         "resources": resources,
         "auction_log": auction_log,
         "agent_summary": agent_summary,
         "gini_coefficient": round(gini, 4),
         "permeability_score": round(float(np.std(spends) / (np.mean(spends) + 1e-8)), 4),
-        "economy_stability": "stable" if gini < 0.45 else "unstable",
+        "economy_stability": "stable" if gini < 0.45 else "vulnerable",
         "total_transactions": len(auction_log),
-        "total_value_cleared": round(sum(r["price_paid"] for r in auction_log), 2),
+        "total_value_cleared": round(sum(r.get("price_paid", 0) for r in auction_log), 2),
     }
-
-
 def _compute_gini(values: list) -> float:
     arr = np.array(sorted(values), dtype=float)
     n = len(arr)
@@ -198,6 +222,214 @@ def _compute_gini(values: list) -> float:
         return 0.0
     cum = np.cumsum(arr)
     return float((n + 1 - 2 * cum.sum() / arr.sum()) / n)
+
+
+def run_monte_carlo_analysis(
+        domain: str = "security",
+        n_simulations: int = 100,
+        n_rounds: int = 8,
+        base_profiles: list = None,
+        custom_resources: list = None,
+        allocation_mechanism: str = "Vickrey"
+) -> dict:
+    """Monte Carlo Sensitivity Analysis with Tornado Plot Data"""
+    if not base_profiles:
+        return {"error": "No base profiles provided"}
+
+    results = []
+    gini_values = []
+    dominance_values = []
+
+    # Sensitivity tracking
+    sensitivity_data = {"gini": {}, "dominance": {}}
+
+    progress_bar = st.progress(0)
+
+    for sim in range(n_simulations):
+        # Random budget variation (±20%)
+        budget_multiplier = np.random.uniform(0.80, 1.20)
+
+        varied_profiles = []
+        for p in base_profiles:
+            varied = p.copy()
+            varied["budget"] = int(varied.get("budget", 200000) * budget_multiplier)
+            varied_profiles.append(varied)
+
+        result = run_agent_economy_simulation(
+            domain=domain,
+            n_rounds=n_rounds,
+            custom_profiles=varied_profiles,
+            custom_resources=custom_resources,
+            allocation_mechanism=allocation_mechanism
+        )
+
+        results.append(result)
+        gini = result.get("gini_coefficient", 0.0)
+        gini_values.append(gini)
+
+        dominance = result.get("research_metrics", {}).get("resource_capture_rate", 0.0)
+        dominance_values.append(dominance)
+
+        # Track sensitivity
+        key = f"Budget ±{int((budget_multiplier - 1) * 100)}%"
+        if key not in sensitivity_data["gini"]:
+            sensitivity_data["gini"][key] = []
+        sensitivity_data["gini"][key].append(gini)
+
+        progress_bar.progress((sim + 1) / n_simulations)
+
+    progress_bar.empty()
+
+    gini_array = np.array(gini_values)
+    dom_array = np.array(dominance_values)
+
+    summary = {
+        "n_simulations": n_simulations,
+        "allocation_mechanism": allocation_mechanism,
+        "gini_mean": round(float(gini_array.mean()), 4),
+        "gini_std": round(float(gini_array.std()), 4),
+        "gini_min": round(float(gini_array.min()), 4),
+        "gini_max": round(float(gini_array.max()), 4),
+        "gini_95ci_low": round(float(np.percentile(gini_array, 2.5)), 4),
+        "gini_95ci_high": round(float(np.percentile(gini_array, 97.5)), 4),
+        "high_capture_risk": round(float((dom_array > 0.45).mean()), 3),
+        "sensitivity_data": sensitivity_data,  #
+        "all_results": results[-8:]  #
+    }
+
+    return summary
+
+
+def plot_monte_carlo_sensitivity(mc_data: dict):
+    """Modern, informative sensitivity visualization"""
+    if not mc_data or "sensitivity_data" not in mc_data:
+        st.info("Run more simulations to generate sensitivity insights.")
+        return None
+
+    sens_data = mc_data.get("sensitivity_data", {}).get("gini", {})
+    if not sens_data:
+        return None
+
+    # Prepare data
+    impact = []
+    for param, values in sens_data.items():
+        clean_vals = [float(v) for v in values if str(v).replace('.','').replace('-','').isdigit()]
+        if clean_vals:
+            impact.append({
+                "Parameter": param,
+                "Mean Gini": round(np.mean(clean_vals), 4),
+                "Std Dev": round(np.std(clean_vals), 4),
+                "Min": round(min(clean_vals), 4),
+                "Max": round(max(clean_vals), 4),
+            })
+
+    df = pd.DataFrame(impact).sort_values("Mean Gini", ascending=False)
+
+    # Create two-column layout
+    col_chart, col_table = st.columns([3, 2])
+
+    with col_chart:
+        # Main Distribution Plot (Violin + Box)
+        fig = go.Figure()
+
+        # Violin plot for full distribution
+        for param, values in sens_data.items():
+            clean = [float(v) for v in values if str(v).replace('.','').replace('-','').isdigit()]
+            if clean:
+                fig.add_trace(go.Violin(
+                    y=[param] * len(clean),
+                    x=clean,
+                    name=param,
+                    orientation='h',
+                    box_visible=True,
+                    meanline_visible=True,
+                    points="all",
+                    jitter=0.1,
+                    marker=dict(size=3)
+                ))
+
+        fig.update_layout(
+            title="Gini Coefficient Distribution Across Simulations",
+            xaxis_title="Gini Coefficient (Higher = More Inequality)",
+            yaxis_title="Varied Parameter",
+            height=500,
+            template="plotly_white",
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_table:
+        st.markdown("**Parameter Impact Ranking**")
+        st.dataframe(
+            df.style.background_gradient(subset=["Mean Gini"], cmap="Reds"),
+            use_container_width=True,
+            height=400
+        )
+
+    # Summary Insights
+    st.info(f"""
+    **Key Insight**: Budget variation has the strongest influence on resource inequality. 
+    The simulation shows Gini coefficients ranging from **{mc_data.get('gini_min',0):.3f}** to **{mc_data.get('gini_max',0):.3f}** 
+    (mean = **{mc_data.get('gini_mean',0):.3f}**).
+    """)
+
+    return fig
+
+
+def recommend_allocation_strategy(goals: list[str]) -> dict:
+    """Strategy Recommendation Engine for National Security Context"""
+
+    scores = {
+        "Vickrey Auction (Truthful Bidding)": 0,
+        "English Auction (Ascending Price)": 0,
+        "First-Price Sealed Bid": 0,
+        "Proportional Fair Allocation": 0,
+        "Priority-Weighted Command (Military)": 0,
+        "Nash Bargaining Solution (Cooperative)": 0,
+    }
+
+    goal_weights = {
+        "Maximize Equity": {"Proportional Fair": 9, "Nash Bargaining": 10, "Priority-Weighted": 6},
+        "Maximize Speed": {"English Auction": 9, "Priority-Weighted": 8, "First-Price": 7},
+        "Maximize Security / Control": {"Priority-Weighted": 10, "Nash Bargaining": 7},
+        "Maximize Transparency": {"English Auction": 10, "Vickrey": 8},
+        "Maximize Collaboration": {"Nash Bargaining": 10, "Proportional Fair": 9},
+        "Maximize Revenue / Efficiency": {"First-Price": 9, "English Auction": 8},
+        "Minimize Strategic Manipulation": {"Vickrey": 10, "Nash Bargaining": 8},
+    }
+
+    for goal in goals:
+        if goal in goal_weights:
+            for strategy, score in goal_weights[goal].items():
+                # Find matching strategy key
+                for key in scores.keys():
+                    if strategy.lower() in key.lower():
+                        scores[key] += score
+                        break
+
+    # Sort by score
+    recommendations = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    top_recommendation = recommendations[0][0]
+    second_recommendation = recommendations[1][0] if len(recommendations) > 1 else None
+
+    reasoning = []
+    if "Maximize Equity" in goals or "Maximize Collaboration" in goals:
+        reasoning.append(
+            "Cooperative mechanisms (Nash Bargaining & Proportional Fair) are preferred when equity and inter-agency coordination are priorities.")
+    if "Maximize Security / Control" in goals:
+        reasoning.append(
+            "Priority-Weighted Command aligns with hierarchical military doctrine and mission-critical control.")
+    if "Maximize Speed" in goals:
+        reasoning.append("English Auction or Priority-Weighted allow faster decision-making under time pressure.")
+
+    return {
+        "top_recommendation": top_recommendation,
+        "second_recommendation": second_recommendation,
+        "scores": {k: v for k, v in recommendations[:3]},
+        "reasoning": reasoning,
+        "goals_analyzed": goals
+    }
 
 
 def render_agent_economy_full(ae: dict, domain: str) -> None:
@@ -216,10 +448,23 @@ def render_agent_economy_full(ae: dict, domain: str) -> None:
     st.markdown(
         f"<div style='background:#fef3c7;border-left:4px solid {AMBER};"
         f"border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:.83rem;color:#374151;'>"
-        f"<strong>💡 What this shows:</strong> {narratives.get(domain, 'Agents compete for scarce resources via Vickrey auctions.')}"
+        f"<strong>💡 What this shows:</strong> {narratives.get(domain, 'This simulation demonstrates how resource competition under budget constraints can lead to strategic dominance by well-funded entities, potentially reducing operational equity across the national security apparatus..')}"
         f"</div>", unsafe_allow_html=True
     )
 
+    st.markdown("""
+        <div style='background:#1e2937;color:#e2e8f0;padding:14px 18px;border-radius:8px;margin-bottom:16px;'>
+            <strong>🔍 Analytical Insight for Security Professionals:</strong> 
+            
+        </div>
+        """, unsafe_allow_html=True)
+    if ae.get("mechanism") == "Nash_Bargaining":
+        st.markdown("""
+        <div style='background:#ecfdf5;border-left:4px solid #14b8a6;padding:12px 16px;border-radius:6px;'>
+            <strong>🤝 Nash Bargaining Applied:</strong> This cooperative mechanism maximizes the <i>product of utility gains</i>, 
+            promoting more equitable outcomes while maintaining efficiency. Ideal for joint operations and inter-agency coordination.
+        </div>
+        """, unsafe_allow_html=True)
     # ── Top KPIs ───────────────────────────────────────────────────────────────
     gini = ae.get("gini_coefficient", ae.get("permeability_score", 0))
     perm = ae.get("permeability_score", 0)
@@ -285,31 +530,31 @@ def render_agent_economy_full(ae: dict, domain: str) -> None:
             )
 
     # ── Lorenz Curve (inequality visualisation) ───────────────────────────────
-    _section("📐 Lorenz Curve — Resource Allocation Inequality", PURPLE)
+    st.subheader("📐 Lorenz Curve — Resource Allocation Inequality")
     if len(agents) >= 2:
         sorted_spends = sorted([a["total_spent"] for a in agents])
-        cum_share = np.cumsum(sorted_spends) / (sum(sorted_spends) + 1e-9)
+        total_spend = sum(sorted_spends) + 1e-9
+        cum_share = np.cumsum(sorted_spends) / total_spend
         pop_share = np.linspace(0, 1, len(sorted_spends) + 1)
         lorenz_y = np.concatenate([[0], cum_share])
 
-        fig_lor = go.Figure()
-        fig_lor.add_scatter(x=[0, 1], y=[0, 1], mode="lines",
-                            line=dict(dash="dash", color="#94a3b8"),
-                            name="Perfect equality")
-        fig_lor.add_scatter(x=pop_share, y=lorenz_y,
-                            mode="lines+markers",
-                            line=dict(color=PURPLE, width=3),
-                            fill="tonexty", fillcolor=f"{PURPLE}20",
-                            name=f"Actual (Gini={gini:.3f})")
-        fig_lor.update_layout(
-            title="Lorenz Curve — Resource Spending Distribution",
-            xaxis_title="Cumulative share of agents",
-            yaxis_title="Cumulative share of spending",
-            height=280, margin=dict(t=40, b=30, l=40, r=10),
-            paper_bgcolor="rgba(0,0,0,0)",
+        fig_lorenz = go.Figure()
+        fig_lorenz.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines",
+                                        line=dict(dash="dash", color="#94a3b8"), name="Perfect Equality"))
+        fig_lorenz.add_trace(go.Scatter(
+            x=pop_share, y=lorenz_y, mode="lines+markers",
+            line=dict(color=PURPLE, width=3),
+            fill="tonexty",
+            fillcolor="rgba(139, 92, 246, 0.15)",  # Fixed safe color
+            name=f"Actual (Gini={gini:.3f})"
+        ))
+        fig_lorenz.update_layout(
+            title="Lorenz Curve — Spending Distribution",
+            xaxis_title="Cumulative Share of Agents",
+            yaxis_title="Cumulative Share of Spending",
+            height=360
         )
-        st.plotly_chart(fig_lor, use_container_width=True, key=f"_ae_lorenz_{domain}")
-
+        st.plotly_chart(fig_lorenz, use_container_width=True, key=f"_ae_lorenz_{domain}")
     # ── Auction log ────────────────────────────────────────────────────────────
     auction_log = ae.get("auction_log", [])
     if auction_log:
@@ -336,7 +581,17 @@ def render_agent_economy_full(ae: dict, domain: str) -> None:
                                   paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_pie, use_container_width=True, key=f"_ae_pie_{domain}")
 
+    # Export for Research
+    if st.button("📥 Export Simulation Data for Analysis"):
+        df_agents = pd.DataFrame(ae.get("agent_summary", []))
+        df_log = pd.DataFrame(ae.get("auction_log", []))
 
+        st.download_button("Download Agent Summary (CSV)", df_agents.to_csv(index=False),
+                           f"sec_agent_economy_{domain}.csv", "text/csv")
+        st.download_button("Download Full Auction Log (CSV)", df_log.to_csv(index=False),
+                           f"sec_auction_log_{domain}.csv", "text/csv")
+
+    st.caption("National Security Agent Economy Model • GAGS Framework v1.0 • For Professional & Research Use")
 # ══════════════════════════════════════════════════════════════════════════════
 # FEATURE 2 — MULTIMODAL RED TEAMING
 # ══════════════════════════════════════════════════════════════════════════════
@@ -424,6 +679,82 @@ DOMAIN_ATTACK_SCENARIOS = {
 }
 
 
+def render_multimodal_redteam_full(rt_result: dict, domain: str = "security"):
+    """Professional & Dynamic Multimodal Red Teaming Results"""
+    if not rt_result or "error" in rt_result:
+        st.error(rt_result.get("error", "No red team data available"))
+        return
+
+    st.subheader("🎯 Multimodal Red Team Results")
+    st.caption("Cross-modal adversarial attack simulation • National Security")
+
+    # Risk Overview
+    combined_bypass = rt_result.get("combined_bypass_rate", 0.0)
+    combined_risk = rt_result.get("combined_sociotechnical_risk", 0.0)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Combined Bypass Rate", f"{combined_bypass:.1%}")
+    c2.metric("Sociotechnical Risk", f"{combined_risk:.2f}/1.0")
+    c3.metric("Attack Chain", "Text → Image → Deepfake")
+
+    st.divider()
+
+    # Modality Breakdown with Unique Scenarios
+    st.markdown("### Attack Modality Breakdown")
+    modality_results = rt_result.get("modality_results", [])
+
+    if not modality_results:
+        st.warning("No modality results available.")
+    else:
+        for r in modality_results:
+            modality_raw = r.get("modality", "UNKNOWN")
+            modality_str = str(modality_raw).replace("AttackModality.", "").upper()
+            vector = r.get("attack_vector", "Unknown Attack")
+            bypass = r.get("bypass_rate", 0.0)
+            risk = r.get("sociotechnical_risk", 0.0)
+            severity = r.get("severity", "MEDIUM")
+
+            severity_emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(severity, "🟢")
+
+            # Dynamic VR Scenario per modality
+            vr_scenario = r.get("vr_scenario")
+            if not vr_scenario:
+                # Fallback dynamic scenarios
+                vr_map = {
+                    "TEXT": "You are reviewing intelligence reports. Suspicious prompt injection detected in text data. Assess credibility.",
+                    "IMAGE": "Live surveillance feed shows anomalies. Image perturbation suspected. Verify before acting.",
+                    "DEEPFAKE": "A deepfake video of a senior official has been injected into the briefing feed. You have 90 seconds to detect the forgery.",
+                    "AUDIO": "You receive an urgent audio directive. Voice synthesis suspected. Validate before execution."
+                }
+                vr_scenario = vr_map.get(modality_str,
+                                         "You are under a sophisticated multimodal attack. Analyze and respond.")
+
+            with st.expander(f"{severity_emoji} {modality_str} — {vector}", expanded=True):
+                st.progress(bypass)
+                st.caption(f"Bypass Rate: **{bypass:.1%}** | Sociotechnical Risk: **{risk:.2f}**")
+
+                st.markdown("**Training Scenario:**")
+                st.info(vr_scenario)
+
+    st.divider()
+
+    # Risk Radar
+    if modality_results:
+        st.markdown("### Risk Radar")
+        modalities = [str(r.get("modality", "Unknown")).replace("AttackModality.", "").upper() for r in
+                      modality_results]
+        bypass_rates = [r.get("bypass_rate", 0) * 100 for r in modality_results]
+        risks = [r.get("sociotechnical_risk", 0) * 100 for r in modality_results]
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatterpolar(r=bypass_rates, theta=modalities, fill='toself', name='Bypass Rate', line_color='#ef4444'))
+        fig.add_trace(
+            go.Scatterpolar(r=risks, theta=modalities, fill='toself', name='Sociotechnical Risk', line_color='#8b5cf6'))
+        fig.update_layout(polar=dict(radialaxis=dict(range=[0, 100])), height=400, title="Attack Risk Profile")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.caption("Multimodal Red Teaming • GAGS Framework v1.0")
 def run_redteam_simulation(domain: str, X=None, y=None) -> dict:
     """Run the full red team simulation with domain-specific narrative."""
     from components.governance_logic import MultimodalRedTeamer

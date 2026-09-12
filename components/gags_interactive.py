@@ -50,9 +50,9 @@ import random
 import hashlib
 from datetime import datetime, date
 from typing import Any
-
+import plotly.graph_objects as go
 import streamlit as st
-
+from components.live_data import national_live_banner, fetch_nigeria_national_live
 
 # ── Points & badge system ─────────────────────────────────────────────────────
 
@@ -440,7 +440,247 @@ def progress_tracker(location: str = "sidebar") -> None:
             f"Badges: {badge_html}</div>",
             unsafe_allow_html=True,
         )
+def render_health_gauge(title: str, current_val: float, target_val: float, unit: str = ""):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=current_val,
+        number={'suffix': unit},
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': title, 'font': {'size': 15}},
+        delta={'reference': target_val, 'increasing': {'color': "#EF4444"}, 'decreasing': {'color': "#10B981"}},
+        gauge={
+            'axis': {'range': [None, max(current_val * 1.2, target_val * 1.2)]},
+            'bar': {'color': "#1F2937"},
+            'steps': [
+                {'range': [0, target_val], 'color': "#D1FAE5"},
+                {'range': [target_val, target_val * 1.5], 'color': "#FEF3C7"},
+            ],
+            'threshold': {
+                'line': {'color': "#EF4444", 'width': 4},
+                'thickness': 0.75,
+                'value': target_val
+            }
+        }
+    ))
+    fig.update_layout(height=220, margin=dict(l=20, r=20, t=35, b=10))
+    st.plotly_chart(fig, use_container_width=True)
 
+
+def render_interactive_healthcare(selected_state: str, state_data: dict):
+    # 1. Display Top Live Status Banner
+    national_live_banner()
+    live_nat = fetch_nigeria_national_live()
+
+    # 2. Divide layout into clean, organized tabs
+    tab_overview, tab_simulator, tab_challenges = st.tabs([
+        "📊 Overview & Baselines",
+        "🎛️ Policy Simulator",
+        "🎯 Regional Targets"
+    ])
+
+    # --- TAB 1: VISUAL KPI DASHBOARD ---
+    with tab_overview:
+        st.subheader(f"📍 State Baseline Metrics: {selected_state}")
+
+        # 4-Column Metric Grid
+        col1, col2, col3, col4 = st.columns(4)
+
+        nat_u5mr = live_nat.get("u5mr", {}).get("value")
+        u5mr_val = state_data.get("u5mr", 0)
+        delta_u5mr = f"{u5mr_val - nat_u5mr:+.1f} vs Nat. Avg" if nat_u5mr and isinstance(u5mr_val,
+                                                                                          (int, float)) else None
+
+        col1.metric("Under-5 Mortality", f"{u5mr_val} / 1k", delta=delta_u5mr, delta_color="inverse")
+        col2.metric("Maternal Mortality Ratio", state_data.get("mmr", "N/A"), delta_color="inverse")
+        col3.metric("Out-of-Pocket Spend", f"{state_data.get('oop', 'N/A')}%")
+        col4.metric("HW Density", f"{state_data.get('hw_density', 'N/A')} / 10k")
+
+        st.divider()
+
+        # Dynamic Plotly Gauges
+        st.markdown("### 🎯 Benchmark Gap Analysis")
+        g_col1, g_col2 = st.columns(2)
+        with g_col1:
+            render_health_gauge("Under-5 Mortality (Target: 25)", float(u5mr_val or 0), target_val=25.0)
+        with g_col2:
+            oop_val = float(state_data.get("oop", 0) or 0)
+            render_health_gauge("Out-of-Pocket Expenditure (Target: < 30%)", oop_val, target_val=30.0, unit="%")
+
+    with tab_simulator:
+        st.subheader("🎛️ Interactive Policy & Budget Simulator")
+        st.caption("Adjust policy levers to simulate potential reductions in mortality rates and out-of-pocket costs.")
+
+        # Responsive 2-Column Controls Layout
+        ctrl_col1, ctrl_col2 = st.columns([1, 1], gap="large")
+
+        with ctrl_col1:
+            st.markdown("#### 🛠️ Budget & Coverage Levers")
+
+            # Session-state safe slider inputs
+            budget_increase = st.slider(
+                "Health Budget Expansion (%)",
+                min_value=0, max_value=100, value=20, step=5,
+                help="Simulates scaling primary healthcare allocations."
+            )
+
+            insurance_coverage = st.slider(
+                "NHIA Insurance Coverage Target (%)",
+                min_value=5, max_value=80, value=state_data.get("insurance_cov", 15), step=5,
+                help="Target percentage of population covered by health insurance."
+            )
+
+        with ctrl_col2:
+            st.markdown("#### 🧑‍⚕️ Infrastructure & Workforce")
+
+            hw_recruitment = st.slider(
+                "Additional Health Workers (per 10k pop)",
+                min_value=0, max_value=25, value=5, step=1,
+                help="Recruitment and deployment of doctors/nurses/midwives."
+            )
+
+            facility_upgrade = st.select_slider(
+                "Primary Healthcare Center Upgrade Level",
+                options=["Baseline", "Basic Refurbish", "Full Renovation", "Advanced Digital PHC"],
+                value="Basic Refurbish"
+            )
+
+        st.divider()
+
+        # --- SIMULATION CALCULATIONS ---
+        base_u5mr = float(state_data.get("u5mr", 80))
+        base_oop = float(state_data.get("oop", 70))
+
+        # Dynamic projection formulas (capped for domain validity)
+        u5mr_reduction_factor = (budget_increase * 0.003) + (hw_recruitment * 0.015) + (
+            0.05 if facility_upgrade != "Baseline" else 0)
+        projected_u5mr = max(15.0, base_u5mr * (1 - u5mr_reduction_factor))
+
+        oop_reduction_factor = (insurance_coverage * 0.006) + (budget_increase * 0.002)
+        projected_oop = max(15.0, base_oop * (1 - oop_reduction_factor))
+
+        # --- VISUAL IMPACT OUTPUTS ---
+        st.markdown("### 📈 Projected Policy Outcomes")
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric(
+            label="Projected Under-5 Mortality",
+            value=f"{projected_u5mr:.1f} / 1k",
+            delta=f"{projected_u5mr - base_u5mr:.1f} deaths",
+            delta_color="inverse"
+        )
+
+        m2.metric(
+            label="Projected OOP Spend",
+            value=f"{projected_oop:.1f}%",
+            delta=f"{projected_oop - base_oop:.1f}%",
+            delta_color="inverse"
+        )
+
+        estimated_cost_ngn = (budget_increase * 1.5) + (hw_recruitment * 0.8)
+        m3.metric(
+            label="Est. Intervention Cost",
+            value=f"₦{estimated_cost_ngn:.1f} Billion",
+            delta="Annual Projection"
+        )
+
+        # Before vs After Comparison Chart
+        st.markdown("#### 📊 Impact Comparison")
+        comp_fig = go.Figure(data=[
+            go.Bar(name='Current Baseline', x=['U5MR (per 1k)', 'OOP Spend (%)'], y=[base_u5mr, base_oop],
+                   marker_color='#9CA3AF'),
+            go.Bar(name='Projected Outcome', x=['U5MR (per 1k)', 'OOP Spend (%)'], y=[projected_u5mr, projected_oop],
+                   marker_color='#10B981')
+        ])
+        comp_fig.update_layout(barmode='group', height=280, margin=dict(l=20, r=20, t=20, b=20))
+        st.plotly_chart(comp_fig, use_container_width=True)
+
+    # =========================================================
+    # --- TAB 3: BENCHMARK CHALLENGES (OPTIMIZED) ---
+    # =========================================================
+    with tab_challenges:
+        st.subheader("🎯 Active Regional Healthcare Targets")
+        st.caption("Track and benchmark local performance against national policy milestones and WHO standards.")
+
+        # Grid-based Challenge Cards
+        c1, c2 = st.columns(2)
+
+        # Challenge 1: Child Mortality Target
+        with c1:
+            u5_val = float(state_data.get("u5mr", 80))
+            u5_target = 25.0
+            u5_progress = min(100.0, max(0.0, ((100 - u5_val) / (100 - u5_target)) * 100))
+
+            st.markdown("""
+                <div style="border:1px solid #E5E7EB; padding:16px; border-radius:10px; background-color:#FAFAFA;">
+                    <h4 style="margin-top:0;">👶 SDG 3.2: Under-5 Mortality Target</h4>
+                    <p style="font-size:0.85rem; color:#4B5563;">Reduce Under-5 Mortality to less than 25 per 1,000 live births.</p>
+                </div>
+            """, unsafe_allow_html=True)
+
+            st.progress(u5_progress / 100)
+            st.caption(
+                f"**Current Status:** {u5_val} / 1k | **Target:** {u5_target} / 1k | **Progress:** {u5_progress:.1f}%")
+
+        # Challenge 2: Out-Of-Pocket Financial Protection
+        with c2:
+            oop_val = float(state_data.get("oop", 70))
+            oop_target = 30.0
+            oop_progress = min(100.0, max(0.0, ((100 - oop_val) / (100 - oop_target)) * 100))
+
+            st.markdown("""
+                <div style="border:1px solid #E5E7EB; padding:16px; border-radius:10px; background-color:#FAFAFA;">
+                    <h4 style="margin-top:0;">💳 Financial Protection (OOP Cap)</h4>
+                    <p style="font-size:0.85rem; color:#4B5563;">Lower out-of-pocket healthcare expenses to under 30% of total spend.</p>
+                </div>
+            """, unsafe_allow_html=True)
+
+            st.progress(oop_progress / 100)
+            st.caption(
+                f"**Current Status:** {oop_val}% | **Target:** < {oop_target}% | **Progress:** {oop_progress:.1f}%")
+
+        st.divider()
+
+        # Interactive State Benchmarking Radar Chart
+        st.markdown("### 🕸️ Multi-Indicator State Readiness")
+
+        categories = ['U5MR Protection', 'OOP Protection', 'HW Density', 'Maternal Health']
+
+        # Normalize values on a 0 - 100 scale for visual clarity
+        state_scores = [
+            max(0, 100 - (float(state_data.get("u5mr", 80)) * 0.8)),
+            max(0, 100 - float(state_data.get("oop", 70))),
+            min(100, float(state_data.get("hw_density", 5)) * 10),
+            max(0, 100 - (float(state_data.get("mmr", 500)) * 0.1))
+        ]
+
+        nat_avg_scores = [50, 30, 40, 45]  # National baseline baseline indicators
+
+        radar_fig = go.Figure()
+        radar_fig.add_trace(go.Scatterpolar(
+            r=state_scores,
+            theta=categories,
+            fill='toself',
+            name=selected_state,
+            fillcolor='rgba(16, 185, 129, 0.3)',
+            line=dict(color='#10B981')
+        ))
+        radar_fig.add_trace(go.Scatterpolar(
+            r=nat_avg_scores,
+            theta=categories,
+            fill='toself',
+            name='National Target Baseline',
+            fillcolor='rgba(59, 130, 246, 0.15)',
+            line=dict(color='#3B82F6', dash='dash')
+        ))
+
+        radar_fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            showlegend=True,
+            height=320,
+            margin=dict(l=40, r=40, t=30, b=30)
+        )
+
+        st.plotly_chart(radar_fig, use_container_width=True)
 
 # ── Scenario story banner ─────────────────────────────────────────────────────
 

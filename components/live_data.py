@@ -8,6 +8,7 @@ from __future__ import annotations
 import json, ssl, urllib.request
 from datetime import datetime, timezone
 from typing import Any, Optional
+import requests
 import streamlit as st
 
 
@@ -57,25 +58,32 @@ def _exchange_rate_ngn() -> dict:
 
 
 @st.cache_data(ttl=86_400, show_spinner=False)
-def fetch_nigeria_live() -> dict:
-    """Fetch all live national indicators. Cached 24h. No API key required."""
-    results = {
-        "mmr":           _who("WHOSIS_000001"),
-        "u5mr":          _wb("SH.DYN.MORT", mrv=2),
-        "oop":           _wb("SH.XPD.OOPC.CH.ZS", mrv=2),
-        "hw_density":    _who("HRH_17"),
-        "gdp_pc":        _wb("NY.GDP.PCAP.CD", mrv=1),
-        "population":    _wb("SP.POP.TOTL", mrv=1),
-        "inflation":     _wb("FP.CPI.TOTL.ZG", mrv=2),
-        "exchange_rate": _exchange_rate_ngn(),
-        "poverty":       _wb("SI.POV.DDAY", mrv=3),
-        "_fetched_at":   datetime.now(timezone.utc).isoformat(),
+@st.cache_data(ttl=86400)  # Cache results for 24 hours
+def fetch_nigeria_national_live():
+    """Fetches the most recent national indicator values from the World Bank API."""
+    indicators = {
+        "u5mr": "SH.DYN.MORT",  # Under-5 Mortality Rate
+        "oop": "SH.XPD.OOPC.CH.ZS",  # Out-of-Pocket Health Spend (%)
+        "gdp_pc": "NY.GDP.PCAP.CD",  # GDP per Capita
     }
-    results["_any_live"] = any(
-        v.get("is_live") for k, v in results.items()
-        if isinstance(v, dict) and not k.startswith("_")
-    )
-    return results
+
+    live_results = {}
+
+    for metric_name, code in indicators.items():
+        url = f"https://api.worldbank.org/v2/country/NGA/indicator/{code}?mrv=1&format=json"
+        try:
+            res = requests.get(url, timeout=5).json()
+            if len(res) > 1 and res[1]:
+                item = res[1][0]
+                live_results[metric_name] = {
+                    "value": float(item["value"]),
+                    "year": item["date"],
+                    "is_live": True
+                }
+        except Exception:
+            live_results[metric_name] = {"value": None, "year": "N/A", "is_live": False}
+
+    return live_results
 
 
 def live_state_info_card(state_name: str, show_live_badge: bool = True) -> None:
@@ -83,7 +91,7 @@ def live_state_info_card(state_name: str, show_live_badge: bool = True) -> None:
     from components.nigeria_states import get_state_params
     profile     = get_state_params(state_name)
     is_national = state_name in ("Nigeria (National Average)", "Nigeria", "", None)
-    live        = fetch_nigeria_live()
+    live        = fetch_nigeria_national_live()
     any_live    = live.get("_any_live", False)
 
     zone_colour = {
@@ -212,34 +220,51 @@ def live_state_info_card(state_name: str, show_live_badge: bool = True) -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
+import streamlit as st
+
 def national_live_banner() -> None:
-    """Compact live data bar shown at top of page."""
-    try:
-        live = fetch_nigeria_live()
-    except Exception:
-        return
+    live = fetch_nigeria_national_live()
     if not live.get("_any_live"):
+        st.info("ℹ️ Running on static baseline data (NDHS/NBS).")
         return
 
-    xr  = live.get("exchange_rate",{})
-    inf = live.get("inflation",{})
-    gdp = live.get("gdp_pc",{})
-    u5  = live.get("u5mr",{})
+    fetched_time = live.get("_fetched_at", "Just now")[:16].replace("T", " ")
 
-    parts = []
-    if xr.get("value"):  parts.append("💱 <b>₦{:,.0f}/$</b>".format(xr["value"]))
-    if inf.get("value"): parts.append("📈 CPI <b>{:.1f}%</b>".format(inf["value"]))
-    if gdp.get("value"): parts.append("💰 GDP/cap <b>${:,.0f}</b>".format(gdp["value"]))
-    if u5.get("value"):  parts.append("👶 U5MR <b>{:.1f}</b>/1k".format(u5["value"]))
-
-    if not parts:
-        return
-
-    st.markdown(
-        "<div style='background:#f0fdf4;border:1px solid #bbf7d0;"
-        "border-radius:6px;padding:5px 14px;margin-bottom:12px;font-size:.72rem;'>"
-        "<span style='color:#16a34a;font-weight:700;'>🔴 Live Nigeria&nbsp;&nbsp;</span>"
-        +"&nbsp;·&nbsp;".join(parts)
-        +"<span style='color:#9ca3af;font-size:.62rem;margin-left:8px;'>World Bank / WHO / ECB</span></div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""
+        <style>
+        .live-banner {{
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(59, 130, 246, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }}
+        .pulse-badge {{
+            background-color: #10B981;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            display: inline-block;
+            animation: pulse 2s infinite;
+        }}
+        @keyframes pulse {{
+            0% {{ box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }}
+            70% {{ box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }}
+            100% {{ box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }}
+        }}
+        </style>
+        <div class="live-banner">
+            <div>
+                <span class="pulse-badge">LIVE API</span>
+                <strong style="margin-left: 10px;">Nigeria Healthcare Feed Active</strong>
+            </div>
+            <span style="font-size: 0.85rem; color: #6B7280;">
+                Last Sync: {fetched_time} UTC
+            </span>
+        </div>
+    """, unsafe_allow_html=True)

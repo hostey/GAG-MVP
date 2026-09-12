@@ -1483,7 +1483,7 @@ def simulate_bias_mitigation(
         y: np.ndarray,
         demographic_info: np.ndarray,
         mitigation_strategy: str = "reweighting"
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:   # Fixed: was typed as 2-tuple
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Apply bias mitigation strategies to the data."""
     if mitigation_strategy == "reweighting":
         weights = np.ones(len(X))
@@ -1495,7 +1495,18 @@ def simulate_bias_mitigation(
         return X[indices], y[indices], demographic_info[indices]
 
     elif mitigation_strategy == "oversampling":
-        # Oversample minority group to balance representation
         groups, counts = np.unique(demographic_info, return_counts=True)
         max_count = int(np.max(counts))
-        all_X, all_y, all_demo
+        all_X, all_y, all_demo = [], [], []
+
+        for group in groups:
+            mask = (demographic_info == group)
+            X_g, y_g = X[mask], y[mask]
+            indices = np.random.choice(len(X_g), size=max_count, replace=True)
+            all_X.append(X_g[indices])
+            all_y.append(y_g[indices])
+            all_demo.append(np.full(max_count, group))
+
+        return np.vstack(all_X), np.concatenate(all_y), np.concatenate(all_demo)
+
+    return X, y, demographic_info

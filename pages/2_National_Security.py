@@ -1,8 +1,8 @@
 # pages/02_🛡️_National_Security.py
 """
-National Security Resilience Simulation — GAGS Framework v3.0
+National Security Resilience Simulation — GAGS Framework v1.0
 
-Refactored to integrate all GAGS v3.0 governance_logic imports:
+Refactored to integrate all GAGS v1.0 governance_logic imports:
   - apply_bias()              with AttackSeverity enum (keyword args only)
   - simulate_data_poisoning() keyword demographic_info (fixes positional crash)
   - calculate_fairness_metrics() always-present group_metrics
@@ -45,7 +45,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-# ── GAGS v3.0 core ────────────────────────────────────────────────────────────
+# ── GAGS v1.0 core ────────────────────────────────────────────────────────────
 try:
     from components.pdf_report import generate_pdf_compliance_report
     PDF_OK = True
@@ -92,7 +92,7 @@ from components.gags_dynamic_systems import run_dynamic_systems_suite
 from components.gags_dynamic_ui import render_dynamic_systems_tab
 from components.gags_safety_ui import render_safety_tab
 from components.gags_features_full import (
-    run_agent_economy_simulation, run_redteam_simulation, run_arena_simulation,
+    run_agent_economy_simulation,render_multimodal_redteam_full,recommend_allocation_strategy, plot_monte_carlo_sensitivity, run_redteam_simulation, run_arena_simulation,render_agent_economy_full,run_monte_carlo_analysis
 )
 from components.gags_feature_modules import (
     feature_modules_tab, multi_challenge_panel,
@@ -345,7 +345,7 @@ with st.sidebar:
     bias_intensity = st.slider("Bias Intensity", 0.0, float(simulation_config.MAX_BIAS_FACTOR), 0.3, 0.05)
     st.divider()
 
-    st.subheader("🔒 Surveillance Configuration")
+    st.subheader(" Surveillance Configuration")
     surveillance_level = st.slider("Surveillance Intensity", 0.0, 1.0, 0.5, 0.05)
     data_retention     = st.slider("Data Retention (days)", 30, 3650, 365, 30)
     oversight_level    = st.selectbox("Oversight Mechanism",
@@ -353,7 +353,7 @@ with st.sidebar:
     threat_level       = st.slider("Perceived Threat Level", 0.0, 1.0, 0.5, 0.05)
     st.divider()
 
-    st.subheader(f"⚠️ {t('attack_header')}")
+    st.subheader(f" {t('attack_header')}")
     attack_type_label = st.selectbox(
         "Attack Type",
         ["label_flipping", "feature_noise", "backdoor", "model_inversion"],
@@ -372,13 +372,13 @@ with st.sidebar:
         key="_ns_dataset_choice")
     st.divider()
 
-    st.subheader(f"📊 {t('sim_params_header')}")
+    st.subheader(f" {t('sim_params_header')}")
     sample_size = st.number_input("Sample Size", 500, 50000, settings.DEFAULT_N_SAMPLES, 500)
     n_runs      = st.slider("Simulation Runs", 1, 8, 3)
     include_baseline = st.toggle("Include Baseline (no bias/attack)", value=True)
     st.divider()
 
-    st.subheader(f"🔬 {t('modules_header')}")
+    st.subheader(f" {t('modules_header')}")
     enable_redteam       = st.toggle("Multimodal Red Team",  value=False)
     enable_governance    = st.toggle("Governance Layer",     value=True)
     enable_gender_audit  = st.toggle("Gender Equity Audit", value=False, help="UNESCO Women4EthicalAI gender bias audit.")
@@ -405,7 +405,7 @@ with st.sidebar:
 
 
 st.markdown(
-    f"""<div class="page-header" style="--ac:#ef4444;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#ef4444;opacity:.55;display:inline-block;"></span>NATIONAL SECURITY · GAGS v3.0</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">National Security Assessment</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">Simulate the surveillance vs civil-liberties trade-off — GTD & UNSW-NB15 datasets, liberty score, judicial oversight analysis.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">GTD Dataset</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">UNSW-NB15</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Liberty Score</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Predictive Policing</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Red Team</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Governance Layer</span></div></div>""",
+    f"""<div class="page-header" style="--ac:#ef4444;"><p style="font-family:'DM Mono',monospace;font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin:0 0 .55rem;display:flex;align-items:center;gap:.45rem;"><span style="width:16px;height:1px;background:#ef4444;opacity:.55;display:inline-block;"></span>NATIONAL SECURITY · GAGS v1.0</p><h1 style="font-family:'Syne',sans-serif!important;font-size:2.5rem!important;font-weight:800!important;line-height:1.08!important;letter-spacing:-.03em!important;margin:0 0 .6rem!important;">National Security Assessment</h1><p style="margin:0;opacity:.72;font-size:.96rem;max-width:660px;line-height:1.65;">Simulate the surveillance vs civil-liberties trade-off — GTD & UNSW-NB15 datasets, liberty score, judicial oversight analysis.</p><div style="margin-top:.9rem;"><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">GTD Dataset</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">UNSW-NB15</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Liberty Score</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Predictive Policing</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Red Team</span><span style="display:inline-flex;align-items:center;padding:.2rem .68rem;border-radius:99px;font-family:'DM Mono',monospace;font-size:.67rem;letter-spacing:.05em;font-weight:500;border:1px solid;text-transform:uppercase;margin:.18rem .12rem 0 0;background:rgba(var(--acr,255,255,255),.11);border-color:rgba(var(--acr,255,255,255),.32);color:#ef4444;">Governance Layer</span></div></div>""",
     unsafe_allow_html=True
 )
 
@@ -511,11 +511,11 @@ if run_button:
                 "narrative": str(_ex),
             }
 
+    # ── Multimodal Red Teaming (National Security Focus) ─────────────────────
     if enable_redteam:
-        try:
-            _fout["multimodal_redteam"] = run_redteam_simulation(domain="security")
-        except Exception as _ex:
-            _fout["multimodal_redteam"] = {"combined_bypass_rate":0,"modality_results":[],"error":str(_ex)}
+        st.markdown("---")
+        st.subheader("🎯 Multimodal Red Teaming Engine")
+        st.caption("Cross-modal adversarial attacks simulation for intelligence & security systems")
 
     if enable_arena:
         try:
@@ -523,12 +523,16 @@ if run_button:
         except Exception as _ex:
             _fout["arena"] = {"final_standings":[],"deception_rate":0,"error":str(_ex)}
 
-
     if enable_agent_economy:
         try:
-            _fout["agent_economy"] = run_agent_economy_simulation(domain="security")
+            _ae_result = run_agent_economy_simulation(domain="security", n_rounds=5)
+            _fout["agent_economy"] = _ae_result
+            # Also store in session_state for persistence
+            st.session_state["sec_feature_outputs"]["agent_economy"] = _ae_result
         except Exception as _ex:
-            _fout["agent_economy"] = {"gini_coefficient":0,"agent_summary":[],"error":str(_ex)}
+            error_result = {"gini_coefficient": 0, "agent_summary": [], "error": str(_ex)}
+            _fout["agent_economy"] = error_result
+            st.session_state["sec_feature_outputs"]["agent_economy"] = error_result
     # ── AI Safety & Robustness Suite ──────────────────────────────────────────
     if enable_ai_safety:
         try:
@@ -1003,7 +1007,6 @@ if st.session_state.security_run_history:
 
     # ── Tab 4: Feature Modules────────────────────────────────────────────
     with T["🔬 Feature Modules"]:
-        _any_feat = any(feats.get(k) for k in ["governance","multimodal_redteam","agent_economy","arena","gender_audit_gap"])
         feature_modules_tab(
             domain="security",
             run_results=st.session_state.get("sec_run_history", []),
@@ -1013,7 +1016,341 @@ if st.session_state.security_run_history:
             agent_economy=_ae_result if _ae_result else None,
             arena=_ar_result if _ar_result else None,
         )
+        # ── Multimodal Red Teaming (National Security Focus) ─────────────────────
+        # ── Interactive Multimodal Red Teaming (National Security) ─────────────────────
+        # ── Interactive Multimodal Red Teaming (National Security) ─────────────────────
+        if enable_redteam:
+            st.markdown("---")
+            st.subheader("🎯 Interactive Multimodal Red Teaming Simulator")
+            st.caption("Dynamic scenario-based adversarial training for intelligence & security operations")
 
+            # Scenario Selection
+            scenario_dict = MultimodalRedTeamer.SCENARIOS
+            scenario_names = [v["name"] for v in scenario_dict.values()]
+
+            selected_scenario_name = st.selectbox(
+                "Select Training Scenario",
+                options=scenario_names,
+                index=0
+            )
+
+            selected_scenario_key = next(
+                (k for k, v in scenario_dict.items() if v["name"] == selected_scenario_name),
+                list(scenario_dict.keys())[0]
+            )
+
+            # Configuration
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                attack_intensity = st.slider("Attack Intensity", 0.1, 0.85, 0.35, 0.05)
+                include_deepfake = st.checkbox("Include Deepfake Attack", value=True)
+
+            with col2:
+                if st.button("🚀 Launch Red Team Exercise", type="primary", use_container_width=True,
+                             key="launch_redteam"):
+                    try:
+                        from components.governance_logic import MultimodalRedTeamer
+
+                        redteamer = MultimodalRedTeamer()
+
+                        n_samples = 1400
+                        X = np.random.randn(n_samples, 14).astype(np.float32)
+                        y = np.random.randint(0, 2, n_samples).astype(np.int32)
+
+                        redteam_result = redteamer.run_combined_attack(
+                            X=X,
+                            y=y,
+                            domain="security",
+                            scenario_key=selected_scenario_key
+                        )
+
+                        if "sec_feature_outputs" not in st.session_state:
+                            st.session_state["sec_feature_outputs"] = {}
+                        st.session_state["sec_feature_outputs"]["multimodal_redteam"] = redteam_result
+
+                        st.success(f"✅ Exercise Launched: **{selected_scenario_name}**")
+
+                    except Exception as ex:
+                        st.error(f"Error: {ex}")
+            # ── Display Results ─────────────────────────────────────────────────────
+            redteam_result = st.session_state.get("sec_feature_outputs", {}).get("multimodal_redteam")
+
+            if redteam_result:
+                render_multimodal_redteam_full(redteam_result, domain="security")
+
+                # ====================== WHAT-IF ANALYSIS ======================
+                st.divider()
+                st.markdown("### 🔬 What-If Scenario Explorer")
+                st.caption("Test how changes in attack intensity or defender readiness affect outcomes")
+
+                whatif_col1, whatif_col2 = st.columns(2)
+                with whatif_col1:
+                    whatif_intensity = st.slider(
+                        "Adjusted Attack Intensity",
+                        0.05, 0.9,
+                        redteam_result.get("combined_bypass_rate", 0.35),
+                        0.05,
+                        key="whatif_intensity"
+                    )
+                with whatif_col2:
+                    defender_effectiveness = st.slider(
+                        "Defender Response Effectiveness",
+                        0.0, 1.0, 0.65, 0.05,
+                        help="How effective are your current defenses?"
+                    )
+
+                if st.button("🔄 Simulate What-If Scenario", type="primary", use_container_width=True):
+                    # Simulated impact calculation
+                    base_bypass = redteam_result.get("combined_bypass_rate", 0.4)
+                    new_bypass = max(0.05, base_bypass * (1 - defender_effectiveness * 0.7))
+
+                    st.success(f"""
+                    **What-If Outcome:**
+                    - New Bypass Rate: **{new_bypass:.1%}** (↓ {max(0, base_bypass - new_bypass):.1%})
+                    - Risk Reduction: **{defender_effectiveness * 100:.0f}%** defender effectiveness applied
+                    - Recommendation: {"Strong defensive posture recommended" if new_bypass < 0.3 else "Increase mitigation measures"}
+                    """)
+            else:
+                st.info("👆 Select a scenario and click **Launch Red Team Exercise** to begin.")
+
+        # ====================== NATIONAL SECURITY AGENT ECONOMY ======================
+        if enable_agent_economy:
+            st.markdown("---")
+            st.subheader("🔒 National Security Resource Allocation Simulator")
+            st.caption("**Fully Customizable** — Define entities, resources, and allocation strategy")
+            tab1, tab2 = st.tabs(["Single Simulation", "Monte Carlo Sensitivity"])
+
+            col_reset, _ = st.columns([1, 5])
+            with col_reset:
+                if st.button("🔄 Reset All", use_container_width=True):
+                    if "custom_resources_list" in st.session_state:
+                        del st.session_state.custom_resources_list
+                    if "sec_feature_outputs" in st.session_state:
+                        st.session_state.sec_feature_outputs.pop("agent_economy", None)
+                        st.session_state.sec_feature_outputs.pop("monte_carlo", None)
+                    st.success("All settings reset!")
+                    st.rerun()
+
+            # Controls
+            with tab1:
+                col1, col2 = st.columns([2, 3])
+                with col1:
+                    n_rounds = st.slider("Number of Auction Rounds", 3, 20, 8)
+                    n_agents = st.number_input("Number of Competing Entities", 3, 10, 5)
+
+                with col2:
+                    mechanism = st.selectbox(
+                        "Allocation Mechanism",
+                        [
+                            "Vickrey Auction (Truthful Bidding)",
+                            "English Auction (Ascending Price)",
+                            "First-Price Sealed Bid",
+                            "Proportional Fair Allocation",
+                            "Priority-Weighted Command (Military)",
+                            "Nash Bargaining Solution (Cooperative)"
+                        ]
+                    )
+                # ====================== STRATEGY RECOMMENDATION ENGINE ======================
+                st.markdown("### 🎯 Strategy Recommendation Engine")
+                st.caption("Select operational context or customize your priorities")
+
+                # Preset Goal Packages
+                preset_options = {
+                    "None (Custom Selection)": [],
+                    "🔴 Crisis Response / Time-Critical": ["Maximize Speed", "Maximize Security / Control",
+                                                          "Minimize Strategic Manipulation"],
+                    "🤝 Joint Inter-Agency Coordination": ["Maximize Collaboration", "Maximize Equity",
+                                                          "Maximize Transparency"],
+                    "🛡️ High Security & Command Control": ["Maximize Security / Control",
+                                                           "Minimize Strategic Manipulation", "Maximize Speed"],
+                    "⚖️ Equity & Fair Resource Distribution": ["Maximize Equity", "Maximize Collaboration",
+                                                               "Maximize Transparency"],
+                    "💰 Budget Optimization & Efficiency": ["Maximize Revenue / Efficiency", "Maximize Speed",
+                                                           "Maximize Security / Control"],
+                    "🌐 Hybrid Operations (Military + Civilian)": ["Maximize Collaboration", "Maximize Equity",
+                                                                  "Maximize Security / Control"],
+                }
+
+                selected_preset = st.selectbox(
+                    "Choose Operational Scenario",
+                    options=list(preset_options.keys()),
+                    index=0
+                )
+
+                # Goals multiselect (pre-filled by preset)
+                default_goals = preset_options[selected_preset]
+
+                goals = st.multiselect(
+                    "Select / Modify Goals",
+                    [
+                        "Maximize Equity",
+                        "Maximize Speed",
+                        "Maximize Security / Control",
+                        "Maximize Transparency",
+                        "Maximize Collaboration",
+                        "Maximize Revenue / Efficiency",
+                        "Minimize Strategic Manipulation"
+                    ],
+                    default=default_goals,
+                    help="You can modify the preset or create your own combination"
+                )
+
+                # Get Recommendation
+                if st.button("🔍 Get Recommended Strategy", type="primary", use_container_width=True):
+                    if goals:
+                        rec = recommend_allocation_strategy(goals)
+
+                        st.success(f"**Top Recommendation:** {rec['top_recommendation']}")
+
+                        if rec.get('second_recommendation'):
+                            st.info(f"Strong Alternative: **{rec['second_recommendation']}**")
+
+                        st.markdown("#### Reasoning")
+                        for reason in rec.get("reasoning", []):
+                            st.markdown(f"• {reason}")
+
+                        # Score Visualization
+                        score_df = pd.DataFrame.from_dict(rec["scores"], orient="index", columns=["Score"])
+                        st.bar_chart(score_df, height=300)
+
+                        # Auto-suggest mechanism for simulation
+                        st.session_state["recommended_mechanism"] = rec['top_recommendation']
+                    else:
+                        st.warning("Please select at least one goal.")
+                # Auto-apply recommended mechanism
+                if "recommended_mechanism" in st.session_state:
+                    st.info(f"💡 We recommend using **{st.session_state['recommended_mechanism']}** for this scenario.")
+                # ====================== CUSTOM AGENT BUILDER ======================
+                st.markdown("### Define Competing Entities")
+                custom_profiles = []
+                for i in range(n_agents):
+                    with st.expander(f"Entity {i + 1}", expanded=(i < 3)):
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            name = st.text_input("Entity Name", f"Entity {i + 1}", key=f"ns_name_{i}")
+                            icon = st.text_input("Icon", "🔒", key=f"ns_icon_{i}")
+                        with c2:
+                            budget = st.number_input("Initial Budget (₦)", 50000, 5000000, 300000 + i * 80000,
+                                                     key=f"ns_budget_{i}")
+                        with c3:
+                            strategy = st.selectbox("Strategy", ["aggressive", "cooperative", "honest"],
+                                                    index=i % 3, key=f"ns_strat_{i}")
+                        custom_profiles.append({
+                            "name": name,
+                            "budget": budget,
+                            "strategy": strategy,
+                            "icon": icon
+                        })
+
+                # ====================== CUSTOM RESOURCES BUILDER ======================
+                st.markdown("### Define Critical Resources to Auction")
+
+                # Predefined options
+                predefined_resources = [
+                    "satellite_bandwidth", "analyst_hours", "sensor_data",
+                    "response_units", "surveillance_drones", "classified_compute",
+                    "special_forces_slots", "cyber_defense_capacity", "intelligence_feeds"
+                ]
+
+                # Session state to persist added resources
+                if "custom_resources_list" not in st.session_state:
+                    st.session_state.custom_resources_list = predefined_resources[:6]
+
+                # Display current resources with remove option
+                current_resources = st.session_state.custom_resources_list
+
+                cols = st.columns(4)
+                for idx, res in enumerate(current_resources):
+                    col = cols[idx % 4]
+                    with col:
+                        if st.button(f"🗑️ {res}", key=f"remove_res_{idx}"):
+                            st.session_state.custom_resources_list.remove(res)
+                            st.rerun()
+
+                # Add new resource
+                new_resource = st.text_input("Add New Critical Resource", placeholder="e.g. quantum_encryption_keys")
+                if st.button("➕ Add Resource") and new_resource.strip():
+                    cleaned = new_resource.strip().lower().replace(" ", "_")
+                    if cleaned not in st.session_state.custom_resources_list:
+                        st.session_state.custom_resources_list.append(cleaned)
+                        st.success(f"Added: {cleaned}")
+                        st.rerun()
+
+                # Final resources list for simulation
+                final_resources = st.session_state.custom_resources_list
+
+                st.info(f"**Current Resources ({len(final_resources)}):** {', '.join(final_resources)}")
+
+                # ====================== RUN BUTTON ======================
+                if st.button("🚀 Run Custom Simulation", type="primary", use_container_width=True):
+                    if not custom_profiles:
+                        st.error("Please define at least one entity")
+                    elif not final_resources:
+                        st.error("Please define at least one resource")
+                    else:
+                        with st.spinner(f"Running {mechanism} on custom resources..."):
+                            # Map mechanism name
+                            mech_map = {
+                                "Vickrey Auction (Truthful Bidding)": "Vickrey",
+                                "English Auction (Ascending Price)": "English",
+                                "First-Price Sealed Bid": "First_Price",
+                                "Proportional Fair Allocation": "Proportional_Fair",
+                                "Priority-Weighted Command (Military)": "Priority_Weighted",
+                                "Nash Bargaining Solution (Cooperative)": "Nash_Bargaining"
+                            }
+
+                            result = run_agent_economy_simulation(
+                                domain="security",
+                                n_rounds=n_rounds,
+                                custom_profiles=custom_profiles,
+                                custom_resources=final_resources,
+                                allocation_mechanism=mech_map[mechanism]
+                            )
+                            st.session_state["sec_feature_outputs"]["agent_economy"] = result
+                            st.success(f"Simulation completed using **{mechanism}**")
+
+                # Display Results
+                _ae_result = st.session_state.get("sec_feature_outputs", {}).get("agent_economy")
+                if _ae_result:
+                    render_agent_economy_full(_ae_result, domain="security")
+            with tab2:  # Monte Carlo Tab
+                st.markdown("### Monte Carlo Sensitivity Analysis")
+                st.caption("Assessing robustness under budget uncertainty")
+
+                mc_col1, mc_col2 = st.columns(2)
+                with mc_col1:
+                    n_simulations = st.slider("Number of Simulations", 30, 300, 100, step=10)
+                    n_rounds_mc = st.slider("Rounds per Simulation", 4, 15, 8)
+
+                with mc_col2:
+                    mc_mechanism = st.selectbox("Allocation Mechanism",
+                                                ["Vickrey", "Nash_Bargaining", "Priority_Weighted"])
+
+                if st.button("🔬 Run Monte Carlo Sensitivity Analysis", type="primary", use_container_width=True):
+                    with st.spinner(f"Running {n_simulations} simulations..."):
+                        mc_result = run_monte_carlo_analysis(
+                            domain="security",
+                            n_simulations=n_simulations,
+                            n_rounds=n_rounds_mc,
+                            base_profiles=custom_profiles,
+                            custom_resources=final_resources,
+                            allocation_mechanism=mc_mechanism
+                        )
+                        st.session_state["sec_feature_outputs"]["monte_carlo"] = mc_result
+                        st.success("Monte Carlo Analysis Complete")
+
+                # Display Results
+                mc_data = st.session_state.get("sec_feature_outputs", {}).get("monte_carlo")
+                if mc_data:
+                    st.subheader("📊 Monte Carlo Sensitivity Analysis")
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Mean Gini", f"{mc_data.get('gini_mean', 0):.3f}")
+                    c2.metric("Gini Std Dev", f"{mc_data.get('gini_std', 0):.3f}")
+                    c3.metric("High Capture Risk", f"{mc_data.get('high_capture_risk', 0):.1%}")
+
+                    # New Sensitivity Visualization
+                    plot_monte_carlo_sensitivity(mc_data)
     # ── Tab 5-8: XAI / Compliance / Longitudinal / Federated ─────────────────
     with T["🧠 Explainable AI"]:
         _xai = st.session_state.get("security_xai_results",{})
@@ -1356,7 +1693,7 @@ else:
         "Configure your scenario in the sidebar and click **Run**. "
         "This module tests AI surveillance systems against bias, adversarial attacks, "
         "and governance constraints — with real-world GTD / UNSW-NB15 datasets and "
-        "full GAGS v3.0 feature integration."
+        "full GAGS v1.0 feature integration."
     )
 
     c1, c2, c3 = st.columns(3)
@@ -1397,7 +1734,7 @@ else:
 st.divider()
 st.markdown(
     "<div style='text-align:center;color:#7f8c8d;padding:1rem 0;'>"
-    "🛡️ National Security Simulation · GAGS Framework v3.0 · "
+    " National Security Simulation · GAGS Framework v1.0 · "
     "GTD / UNSW-NB15 · Multimodal Red Teaming · Governance Ledger"
     "</div>",
     unsafe_allow_html=True,

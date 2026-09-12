@@ -448,6 +448,205 @@ class AgentEconomySandbox:
         ]
 
     # ── public ────────────────────────────────────────────────────────────────
+    def run_english_auction(self, resource: str) -> dict:
+        """English Auction (Ascending Price) - Transparent, dynamic bidding"""
+        bidders = [a for a in self.agents if a.budget > 0]
+        if not bidders:
+            return {"resource": resource, "winner": "None", "price_paid": 0, "mechanism": "English"}
+
+        # Simulate ascending bids
+        current_price = 0
+        winner = None
+        final_price = 0
+
+        for _ in range(8):  # Multiple bidding rounds
+            active_bidders = [a for a in bidders if a.budget > current_price]
+            if not active_bidders:
+                break
+            # Highest valuation bidder (strategy + random factor)
+            winner = max(active_bidders, key=lambda a: a.budget * (1.3 if a.strategy == "aggressive" else 1.0))
+            current_price += max(5000, int(winner.budget * 0.08))
+
+        if winner:
+            final_price = min(winner.budget * 0.85, current_price)
+            winner.budget -= final_price
+            winner.total_spent += final_price
+            winner.wins += 1
+
+        return {
+            "resource": resource,
+            "winner": winner.name if winner else "None",
+            "price_paid": round(final_price, 2),
+            "mechanism": "English"
+        }
+
+    def run_first_price_auction(self, resource: str) -> dict:
+        """First-Price Sealed Bid - Common in defense contracting"""
+        bidders = [a for a in self.agents if a.budget > 0]
+        if not bidders:
+            return {"resource": resource, "winner": "None", "price_paid": 0, "mechanism": "First_Price"}
+
+        # Each bidder submits sealed bid based on strategy
+        bids = {}
+        for agent in bidders:
+            if agent.strategy == "aggressive":
+                bid = agent.budget * np.random.uniform(0.75, 0.95)
+            elif agent.strategy == "cooperative":
+                bid = agent.budget * np.random.uniform(0.45, 0.65)
+            else:
+                bid = agent.budget * np.random.uniform(0.55, 0.80)
+            bids[agent] = bid
+
+        winner = max(bids, key=bids.get)
+        final_price = bids[winner]
+
+        winner.budget -= final_price
+        winner.total_spent += final_price
+        winner.wins += 1
+
+        return {
+            "resource": resource,
+            "winner": winner.name,
+            "price_paid": round(final_price, 2),
+            "mechanism": "First_Price"
+        }
+
+    def run_proportional_fair_allocation(self, resource: str) -> dict:
+        """Proportional Fair Allocation - Balances efficiency and equity"""
+        total_budget = sum(a.budget for a in self.agents if a.budget > 0)
+        if total_budget == 0:
+            return {"resource": resource, "winner": "None", "price_paid": 0, "mechanism": "Proportional_Fair"}
+
+        shares = []
+        for agent in self.agents:
+            if agent.budget > 0:
+                share = (agent.budget / total_budget) * 100000  # Base resource value
+                allocated = min(share, agent.budget * 0.6)
+                agent.budget -= allocated
+                agent.total_spent += allocated
+                shares.append((agent, allocated))
+
+        # Winner = highest allocation
+        winner, amount = max(shares, key=lambda x: x[1])
+
+        return {
+            "resource": resource,
+            "winner": winner.name,
+            "price_paid": round(amount, 2),
+            "mechanism": "Proportional_Fair"
+        }
+
+    def run_priority_weighted_allocation(self, resource: str) -> dict:
+        """Priority-Weighted Command Allocation - Military Doctrine Style"""
+        # Strategic priority scores
+        priority_map = {
+            "National Intelligence Agency": 1.0,
+            "Military Cyber Command": 0.95,
+            "Private Contractor": 0.65,
+            "Civil Defence Corps": 0.55,
+            "State Police": 0.70,
+        }
+
+        best_score = -1
+        winner = None
+
+        for agent in self.agents:
+            base_priority = priority_map.get(agent.name, 0.6)
+            strategy_bonus = 1.25 if agent.strategy == "aggressive" else 0.9
+            score = base_priority * strategy_bonus * (agent.budget / 500000)
+
+            if score > best_score:
+                best_score = score
+                winner = agent
+
+        if winner and winner.budget > 0:
+            amount = min(winner.budget * 0.75, 180000)
+            winner.budget -= amount
+            winner.total_spent += amount
+            winner.wins += 1
+        else:
+            amount = 0
+
+        return {
+            "resource": resource,
+            "winner": winner.name if winner else "None",
+            "price_paid": round(amount, 2),
+            "mechanism": "Priority_Weighted"
+        }
+    def run_nash_bargaining_allocation(self, resource: str) -> dict:
+        """Nash Bargaining Solution (NBS) - Cooperative Game Theory
+        Maximizes the product of utility gains (fair & efficient division)"""
+        active_agents = [a for a in self.agents if a.budget > 0]
+        if len(active_agents) < 2:
+            # Fallback to proportional if only one agent
+            if active_agents:
+                winner = active_agents[0]
+                amount = min(winner.budget * 0.7, 150000)
+                winner.budget -= amount
+                winner.total_spent += amount
+                winner.wins += 1
+                return {
+                    "resource": resource,
+                    "winner": winner.name,
+                    "price_paid": round(amount, 2),
+                    "mechanism": "Nash_Bargaining",
+                    "bargaining_type": "Single Agent"
+                }
+            return {"resource": resource, "winner": "None", "price_paid": 0, "mechanism": "Nash_Bargaining"}
+
+        # Calculate disagreement point (status quo = current budget)
+        disagreement = {a: a.budget for a in active_agents}
+
+        # Utility = budget after allocation (linear utility for simplicity)
+        # NBS maximizes product of (utility_i - disagreement_i)
+        best_allocation = None
+        best_product = -1
+
+        # Try multiple divisions (Monte Carlo style for tractability)
+        for _ in range(120):  # 120 random feasible divisions
+            total_to_allocate = min(180000, sum(a.budget * 0.6 for a in active_agents))
+            allocation = {}
+            remaining = total_to_allocate
+
+            for agent in active_agents[:-1]:
+                share = np.random.uniform(0.1, 0.6)
+                amount = min(remaining * share, agent.budget * 0.75)
+                allocation[agent] = amount
+                remaining -= amount
+
+            # Last agent gets remainder
+            last = active_agents[-1]
+            allocation[last] = max(0, remaining)
+
+            # Calculate Nash product
+            product = 1.0
+            for agent, amt in allocation.items():
+                gain = max(0, amt)  # utility gain over disagreement
+                product *= (gain + 1e-8)
+
+            if product > best_product:
+                best_product = product
+                best_allocation = allocation
+
+        # Apply best allocation
+        winner = None
+        max_amount = 0
+        for agent, amount in best_allocation.items():
+            if amount > max_amount:
+                max_amount = amount
+                winner = agent
+            agent.budget -= amount
+            agent.total_spent += amount
+            agent.wins += 1
+
+        return {
+            "resource": resource,
+            "winner": winner.name if winner else "Collective",
+            "price_paid": round(max_amount, 2),
+            "mechanism": "Nash_Bargaining",
+            "nash_product": round(float(best_product), 4),
+            "bargaining_type": "Cooperative NBS"
+        }
     def run_auction_round(
         self, resource: str, reserve_price: float = 10.0
     ) -> Dict[str, Any]:
@@ -520,162 +719,235 @@ class AgentEconomySandbox:
 # §5  FEATURE 2 — MULTIMODAL RED TEAMING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class MultimodalRedTeamer:
-    """
-    Simulates cross-modal adversarial attacks (text injection, adversarial image
-    perturbation, deepfake substitution) and produces a risk report enriched with
-    VR/AR scenario metadata for immersive human-AI role-play sessions.
-    """
+import numpy as np
+from enum import Enum
+from dataclasses import dataclass
+from typing import Tuple, Dict, Any, List
+import logging
 
-    SOCIOTECHNICAL_WEIGHTS: Dict[AttackModality, float] = {
-        AttackModality.TEXT:     0.4,
-        AttackModality.IMAGE:    0.6,
-        AttackModality.AUDIO:    0.5,
+logger = logging.getLogger(__name__)
+
+class AttackModality(Enum):
+    TEXT = "text"
+    IMAGE = "image"
+    AUDIO = "audio"
+    DEEPFAKE = "deepfake"
+    COMBINED = "combined"
+
+class AttackSeverity(Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+@dataclass
+class MultimodalAttackResult:
+    modality: AttackModality
+    attack_vector: str
+    severity: AttackSeverity
+    affected_samples: int
+    bypass_rate: float
+    sociotechnical_risk: float
+    vr_scenario: str = None
+    metadata: Dict = None
+
+
+class MultimodalRedTeamer:
+    """Advanced Multimodal Red Teaming Engine for National Security"""
+
+    SOCIOTECHNICAL_WEIGHTS = {
+        AttackModality.TEXT: 0.4,
+        AttackModality.IMAGE: 0.6,
+        AttackModality.AUDIO: 0.5,
         AttackModality.DEEPFAKE: 0.9,
         AttackModality.COMBINED: 1.0,
     }
 
-    VR_SCENARIO_TEMPLATES: Dict[str, str] = {
-        "healthcare": (
-            "You are a clinician in a virtual A&E department. "
-            "Diagnostic AI flags a patient as low-risk. An image prompt-injection "
-            "has subtly altered the X-ray metadata. Decide whether to override."
-        ),
-        "national_security": (
-            "You are an analyst in a virtual operations centre. "
-            "A deepfake video of an official has been fed into the briefing pipeline. "
-            "Identify the forgery under time pressure before an incorrect order is issued."
-        ),
-        "agrotech": (
-            "You are a regional agricultural officer. "
-            "An audio deepfake of a market price broadcast has mis-priced staple crops. "
-            "Smallholder agents are already responding. Can you intervene in time?"
-        ),
+    # Dynamic VR/AR Training Scenarios per Modality
+    # Dynamic VR/AR Training Scenarios
+    VR_SCENARIO_TEMPLATES = {
+        "TEXT": "You are reviewing urgent intelligence reports. Suspicious prompt injection detected in text data. Assess credibility before forwarding.",
+        "IMAGE": "Live surveillance feed shows potential enemy movement. Image perturbation suspected. Verify metadata before acting.",
+        "AUDIO": "You receive an urgent audio directive. Voice synthesis suspected. Validate authenticity before execution.",
+        "DEEPFAKE": "A deepfake video of a senior official has been injected into the briefing feed. You have 90 seconds to detect the forgery before an incorrect operational order is issued.",
+        "COMBINED": "Multiple coordinated attacks detected. Text, image, and deepfake vectors active. Prioritize response under extreme pressure."
+    }
+    VR_SCENARIO_TEMPLATES = {
+        "health": {
+            "title": "Falsified referral / imaging deepfake",
+            "setting": "District hospital + PHC referral chain",
+            "narrative": (
+                "Adversary injects a forged radiology or ID record so a high-risk "
+                "maternal/malaria case is routed as low acuity."
+            ),
+        },
+        "security": {
+            "title": "Generic adversarial identity spoof",
+            "setting": "Access control",
+            "narrative": "Synthetic identity used to poison a decision boundary.",
+        },
+        "default": {
+            "title": "Generic deepfake probe",
+            "setting": "unspecified",
+            "narrative": "Fallback scenario when no domain template exists.",
+        },
     }
 
-    # ── individual attack methods ─────────────────────────────────────────────
+
+
+    # Dynamic Scenario Library
+    SCENARIOS = {
+        "intelligence_briefing_compromise": {
+            "name": "Intelligence Briefing Compromise",
+            "description": "Deepfake video of senior official injected into secure briefing feed",
+            "threat_level": "High",
+            "domain": "security",
+            "vr_prompt": "You are the duty officer. A deepfake orders an immediate strike on coordinates that contradict known intelligence. Time pressure: 90 seconds.",
+            "expected_decision": "Immediate verification + alert",
+            "learning_objective": "Deepfake detection under time pressure"
+        },
+        "surveillance_feed_manipulation": {
+            "name": "Surveillance Feed Manipulation",
+            "description": "Adversarial image perturbation on real-time drone feed",
+            "threat_level": "Medium",
+            "domain": "security",
+            "vr_prompt": "Live surveillance shows enemy movement. Image attack has altered metadata. Verify before committing resources.",
+            "expected_decision": "Request secondary confirmation",
+            "learning_objective": "Visual adversarial robustness"
+        },
+        "command_system_attack": {
+            "name": "Command & Control System Attack",
+            "description": "Combined text + deepfake attack on operational orders",
+            "threat_level": "Critical",
+            "domain": "security",
+            "vr_prompt": "You receive conflicting orders via compromised channel. One is from a trusted source. Decide within 60 seconds.",
+            "expected_decision": "Escalate & isolate channel",
+            "learning_objective": "Multi-modal attack chain recognition"
+        },
+        "civilian_infrastructure": {
+            "name": "Critical Infrastructure Compromise",
+            "description": "Deepfake + image attack on power grid monitoring system",
+            "threat_level": "High",
+            "domain": "security",
+            "vr_prompt": "AI monitoring system reports false overload. Deepfake confirms emergency shutdown order.",
+            "expected_decision": "Manual override + human verification",
+            "learning_objective": "Protecting civilian infrastructure"
+        }
+    }
+
     def simulate_text_injection(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        injection_rate: float = 0.1,
+        self, X: np.ndarray, y: np.ndarray, injection_rate: float = 0.12
     ) -> Tuple[np.ndarray, np.ndarray, MultimodalAttackResult]:
-        """Adversarial prompt injection via text-proxy features (columns 4–6)."""
+        """Text / Prompt Injection Attack"""
         n_inject = int(len(X) * injection_rate)
+        if n_inject == 0:
+            n_inject = 1
         idx = np.random.choice(len(X), n_inject, replace=False)
 
-        X_a, y_a = X.copy(), y.copy()
-        text_cols = [4, 5, 6] if X.shape[1] > 6 else list(range(min(3, X.shape[1])))
-        X_a[np.ix_(idx, text_cols)] += np.random.normal(2.5, 0.8, (n_inject, len(text_cols)))
+        X_a = X.copy()
+        y_a = y.copy()
+
+        # Target text-like feature columns (adjust based on your data)
+        text_cols = [min(4, X.shape[1]-1), min(5, X.shape[1]-1), min(6, X.shape[1]-1)]
+        text_cols = [c for c in text_cols if c < X.shape[1]]
+
+        if text_cols:
+            X_a[np.ix_(idx, text_cols)] += np.random.normal(2.8, 1.1, (n_inject, len(text_cols)))
+
         y_a[idx] = 1 - y_a[idx]
 
-        bypass = float(np.clip(injection_rate * 1.8, 0, 1))
-        result = MultimodalAttackResult(
+        bypass = float(np.clip(injection_rate * 1.75, 0.05, 0.95))
+
+        return X_a, y_a, MultimodalAttackResult(
             modality=AttackModality.TEXT,
             attack_vector="prompt_injection",
             severity=AttackSeverity.HIGH if injection_rate > 0.15 else AttackSeverity.MEDIUM,
             affected_samples=n_inject,
             bypass_rate=round(bypass, 3),
             sociotechnical_risk=self.SOCIOTECHNICAL_WEIGHTS[AttackModality.TEXT],
-            vr_scenario=None,
-            metadata={"injection_rate": injection_rate, "text_cols": text_cols},
+            vr_scenario=self.VR_SCENARIO_TEMPLATES["TEXT"],
+            metadata={"injection_rate": injection_rate}
         )
-        logger.info(f"[Multimodal] Text injection: {n_inject} samples, bypass={bypass:.1%}")
-        return X_a, y_a, result
 
     def simulate_image_attack(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        noise_scale: float = 1.5,
+        self, X: np.ndarray, y: np.ndarray, noise_scale: float = 1.8
     ) -> Tuple[np.ndarray, np.ndarray, MultimodalAttackResult]:
-        """Adversarial pixel-space perturbation (image features proxied by high-index cols)."""
+        """Adversarial Image Perturbation"""
         X_a = X.copy()
         img_cols = list(range(min(7, X.shape[1]), X.shape[1]))
-        if img_cols:
-            sign_noise = np.sign(np.random.randn(len(X), len(img_cols))) * noise_scale
-            X_a[:, img_cols] += sign_noise
+        if not img_cols:
+            img_cols = list(range(X.shape[1]//2, X.shape[1]))
 
-        result = MultimodalAttackResult(
+        sign_noise = np.sign(np.random.randn(len(X), len(img_cols))) * noise_scale
+        X_a[:, img_cols] += sign_noise
+
+        return X_a, y, MultimodalAttackResult(
             modality=AttackModality.IMAGE,
             attack_vector="adversarial_pixel_perturbation",
             severity=AttackSeverity.HIGH if noise_scale > 2.0 else AttackSeverity.MEDIUM,
             affected_samples=len(X),
-            bypass_rate=round(float(np.clip(noise_scale / 5.0, 0, 1)), 3),
+            bypass_rate=round(float(np.clip(noise_scale / 5.0, 0.1, 0.95)), 3),
             sociotechnical_risk=self.SOCIOTECHNICAL_WEIGHTS[AttackModality.IMAGE],
-            vr_scenario=None,
-            metadata={"noise_scale": noise_scale},
+            vr_scenario=self.VR_SCENARIO_TEMPLATES["IMAGE"],
+            metadata={"noise_scale": noise_scale}
         )
-        logger.info(f"[Multimodal] Image attack: noise_scale={noise_scale}")
-        return X_a, y, result
 
     def simulate_deepfake(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        domain: str = "healthcare",
+        self, X: np.ndarray, y: np.ndarray, domain: str = "security"
     ) -> Tuple[np.ndarray, np.ndarray, MultimodalAttackResult]:
-        """
-        Synthetic identity substitution (deepfake).
-        Highest sociotechnical risk — humans are most susceptible to this modality.
-        """
-        n_fake = int(len(X) * 0.2)
+        """Deepfake / Identity Substitution Attack"""
+        n_fake = int(len(X) * 0.22)
         idx = np.random.choice(len(X), n_fake, replace=False)
 
-        X_a, y_a = X.copy(), y.copy()
-        X_a[idx] = X_a[idx] * 0.3 + np.random.normal(0, 2.0, (n_fake, X.shape[1]))
+        X_a = X.copy()
+        y_a = y.copy()
+
+        X_a[idx] = X_a[idx] * 0.35 + np.random.normal(0, 2.2, (n_fake, X.shape[1]))
         y_a[idx] = 1 - y_a[idx]
 
-        vr = self.VR_SCENARIO_TEMPLATES.get(domain, self.VR_SCENARIO_TEMPLATES["healthcare"])
-        result = MultimodalAttackResult(
+        vr = self.VR_SCENARIO_TEMPLATES.get(domain, self.VR_SCENARIO_TEMPLATES["security"])
+
+        return X_a, y_a, MultimodalAttackResult(
             modality=AttackModality.DEEPFAKE,
             attack_vector="synthetic_identity_substitution",
             severity=AttackSeverity.CRITICAL,
             affected_samples=n_fake,
-            bypass_rate=0.78,
+            bypass_rate=0.82,
             sociotechnical_risk=self.SOCIOTECHNICAL_WEIGHTS[AttackModality.DEEPFAKE],
-            vr_scenario=vr,
-            metadata={"domain": domain, "fake_rate": 0.2},
+            vr_scenario=self.VR_SCENARIO_TEMPLATES["DEEPFAKE"],
+            metadata={"domain": domain, "fake_rate": 0.22}
         )
-        logger.info(f"[Multimodal] Deepfake: {n_fake} samples, domain={domain}")
-        return X_a, y_a, result
 
-    # ── combined entry point ──────────────────────────────────────────────────
     def run_combined_attack(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        domain: str = "healthcare",
+            self,
+            X: np.ndarray,
+            y: np.ndarray,
+            domain: str = "security",
+            scenario_key: str = None
     ) -> Dict[str, Any]:
-        """Run text → image → deepfake sequentially and return aggregated report."""
+        """Run red team attack with dynamic scenario"""
+        if scenario_key and scenario_key in self.SCENARIOS:
+            selected = self.SCENARIOS[scenario_key]
+        else:
+            selected = list(self.SCENARIOS.values())[0]  # default
+
+        # Run the attacks
         X1, y1, r1 = self.simulate_text_injection(X, y)
         X2, y2, r2 = self.simulate_image_attack(X1, y1)
         X3, y3, r3 = self.simulate_deepfake(X2, y2, domain)
 
-        combined_risk   = float(np.mean([r.sociotechnical_risk for r in (r1, r2, r3)]))
+        combined_risk = float(np.mean([r.sociotechnical_risk for r in (r1, r2, r3)]))
         combined_bypass = float(np.mean([r.bypass_rate for r in (r1, r2, r3)]))
 
         return {
-            "modality_results": [
-                {
-                    "modality":           r.modality.value,
-                    "attack_vector":      r.attack_vector,
-                    "severity":           r.severity.value,
-                    "affected_samples":   r.affected_samples,
-                    "bypass_rate":        r.bypass_rate,
-                    "sociotechnical_risk":r.sociotechnical_risk,
-                    "vr_scenario":        r.vr_scenario,
-                }
-                for r in (r1, r2, r3)
-            ],
+            "modality_results": [r.__dict__ for r in (r1, r2, r3)],
             "combined_sociotechnical_risk": round(combined_risk, 3),
-            "combined_bypass_rate":         round(combined_bypass, 3),
-            # Arrays kept for callers that need them; strip before JSON-encoding
+            "combined_bypass_rate": round(combined_bypass, 3),
+            "scenario": selected,
             "final_X": X3,
             "final_y": y3,
+            "domain": domain
         }
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # §6  FEATURE 3 — AFRICA-CENTRIC DATA & GENDER EQUITY AUDIT
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -869,9 +1141,12 @@ class HybridGovernanceLayer:
         if fair_drop > thr["fairness_drop"]:
             flags.append(f"Fairness drift: -{fair_drop:.3f} (threshold {thr['fairness_drop']})")
 
+        # Safe dictionary access with numeric fallback
         demo_shift = abs(
-            baseline_metrics.get("demographic_parity", 0.0)
-            - current_metrics.get("demographic_parity", 0.0)
+            baseline_metrics.get("demographic_parity",
+                                 baseline_metrics.get("demographic_parity_difference", 0.0))
+            - current_metrics.get("demographic_parity",
+                                  current_metrics.get("demographic_parity_difference", 0.0))
         )
         if demo_shift > thr["demographic_shift"]:
             flags.append(f"Demographic parity shift: {demo_shift:.3f} (threshold {thr['demographic_shift']})")
@@ -1760,6 +2035,166 @@ def run_simple_simulation(
 # ═══════════════════════════════════════════════════════════════════════════════
 # §15  EXPLAINABLE AI (XAI) MODULE
 # ═══════════════════════════════════════════════════════════════════════════════
+def explain_prediction(
+    model: Any,
+    X_train: np.ndarray,
+    instance: np.ndarray,
+    feature_names: Optional[List[str]] = None,
+    domain: str = "generic",
+    instance_idx: int = 0,
+) -> PredictionExplanation:
+    """
+    Convenience wrapper — explain a single instance prediction from any
+    sklearn-compatible model without creating an ExplainableModel object.
+    """
+    xm = ExplainableModel(domain=domain)
+    xm.model = model
+    xm._X_train = X_train
+    n_feat = instance.flatten().shape[0]
+    xm.feature_names = (
+        feature_names
+        if feature_names and len(feature_names) == n_feat
+        else _name_features(n_feat, domain)
+    )
+    xm._is_fitted = True
+    return xm.explain_instance(instance, instance_idx=instance_idx)
+
+
+def generate_counterfactual(
+    model: Any,
+    X_train: np.ndarray,
+    instance: np.ndarray,
+    target_class: Optional[int] = None,
+    feature_names: Optional[List[str]] = None,
+    domain: str = "generic",
+) -> CounterfactualResult:
+    """
+    Convenience wrapper — generate a DiCE-lite minimal counterfactual explanation
+    showing feature changes needed to alter model prediction.
+    """
+    xm = ExplainableModel(domain=domain)
+    xm.model = model
+    xm._X_train = X_train
+    n_feat = instance.flatten().shape[0]
+    xm.feature_names = (
+        feature_names
+        if feature_names and len(feature_names) == n_feat
+        else _name_features(n_feat, domain)
+    )
+    xm._is_fitted = True
+    return xm.counterfactual(instance, target_class=target_class)
+
+
+def generate_model_card(
+    performance_metrics: Dict[str, float],
+    fairness_metrics: Dict[str, float],
+    domain: str = "generic",
+    bias_findings: Optional[List[str]] = None,
+    version: str = "1.0",
+) -> ModelCard:
+    """
+    Standalone helper to generate a standardized Google/HuggingFace Model Card
+    from simulation output dictionaries.
+    """
+    xm = ExplainableModel(domain=domain)
+    return xm.model_card(
+        performance_metrics=performance_metrics,
+        fairness_metrics=fairness_metrics,
+        domain=domain,
+        bias_findings=bias_findings,
+        version=version,
+    )
+
+
+def generate_intersectional_fairness(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    demographic_groups: Dict[str, np.ndarray],
+) -> IntersectionalFairnessResult:
+    """
+    Compute multi-axis intersectional fairness metrics across compound demographic groups
+    (e.g., low-income female rural vs. high-income male urban).
+
+    Parameters
+    ----------
+    y_true : Ground truth binary targets
+    y_pred : Model predictions
+    demographic_groups : Dict mapping demographic dimension names (e.g. 'gender', 'income')
+                         to categorical array vectors matching the length of y_true.
+    """
+    axes = list(demographic_groups.keys())
+    n_samples = len(y_true)
+
+    # Build compound group identifier strings for each sample
+    compound_keys = [
+        "_".join(str(demographic_groups[axis][i]) for axis in axes)
+        for i in range(n_samples)
+    ]
+    compound_arr = np.array(compound_keys)
+    unique_compound = np.unique(compound_arr)
+
+    group_performances: Dict[str, Dict[str, float]] = {}
+    for group in unique_compound:
+        mask = compound_arr == group
+        if np.sum(mask) == 0:
+            continue
+        gt, gp = y_true[mask], y_pred[mask]
+        acc = float(np.mean(gp == gt))
+        err = float(np.mean(gp != gt))
+        tp = int(np.sum((gp == 1) & (gt == 1)))
+        fp = int(np.sum((gp == 1) & (gt == 0)))
+        tn = int(np.sum((gp == 0) & (gt == 0)))
+        fn = int(np.sum((gp == 0) & (gt == 1)))
+        fpr = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+        fnr = float(fn / (fn + tp)) if (fn + tp) > 0 else 0.0
+
+        group_performances[group] = {
+            "accuracy": round(acc, 4),
+            "error_rate": round(err, 4),
+            "fpr": round(fpr, 4),
+            "fnr": round(fnr, 4),
+            "sample_size": int(np.sum(mask)),
+        }
+
+    accs = {g: meta["accuracy"] for g, meta in group_performances.items()}
+    worst_group = min(accs, key=accs.get)
+    best_group = max(accs, key=accs.get)
+    intersectional_gap = round(float(accs[best_group] - accs[worst_group]), 4)
+
+    # Single-axis disparity gaps
+    single_axis_gaps: Dict[str, float] = {}
+    for axis, vals in demographic_groups.items():
+        axis_accs = []
+        for uval in np.unique(vals):
+            mask = vals == uval
+            if np.sum(mask) > 0:
+                axis_accs.append(float(np.mean(y_pred[mask] == y_true[mask])))
+        if len(axis_accs) >= 2:
+            single_axis_gaps[axis] = round(float(max(axis_accs) - min(axis_accs)), 4)
+        else:
+            single_axis_gaps[axis] = 0.0
+
+    max_single_gap = max(single_axis_gaps.values()) if single_axis_gaps else 0.01
+    amplification_factor = round(float(intersectional_gap / (max_single_gap + 1e-8)), 2)
+
+    narrative = (
+        f"Intersectional evaluation across dimensions {axes} identified an overall "
+        f"performance gap of {intersectional_gap:.1%} between worst group '{worst_group}' "
+        f"({accs[worst_group]:.1%}) and best group '{best_group}' ({accs[best_group]:.1%}). "
+        f"Compound disparity amplifies single-axis bias by a factor of {amplification_factor}x."
+    )
+
+    return IntersectionalFairnessResult(
+        axes=axes,
+        group_performances=group_performances,
+        worst_intersectional_group=worst_group,
+        best_intersectional_group=best_group,
+        intersectional_gap=intersectional_gap,
+        single_axis_gaps=single_axis_gaps,
+        amplification_factor=amplification_factor,
+        narrative=narrative,
+    )
+
 """
 XAI layer for GAGS v1.0 — no external dependencies (sklearn only).
 
@@ -2466,62 +2901,62 @@ def generate_intersectional_fairness(
             narrative="Insufficient data for intersectional analysis.",
         )
 
-    # Compute accuracy per group
-    group_perf: Dict[str, Dict[str, float]] = {}
-    for label, mask in group_labels.items():
-        gt, gp = y_true[mask], y_pred[mask]
-        if len(gt) == 0:
-            continue
-        acc = float(np.mean(gp == gt))
-        fpr = float(np.mean(gp[gt == 0] == 1)) if (gt == 0).any() else 0.0
-        fnr = float(np.mean(gp[gt == 1] == 0)) if (gt == 1).any() else 0.0
-        group_perf[label] = {
-            "accuracy":   round(acc, 4),
-            "fpr":        round(fpr, 4),
-            "fnr":        round(fnr, 4),
-            "sample_size": int(np.sum(mask)),
-        }
+        # Compute accuracy per group
+        group_perf: Dict[str, Dict[str, float]] = {}
+        for label, mask in group_labels.items():
+            gt, gp = y_true[mask], y_pred[mask]
+            if len(gt) == 0:
+                continue
+            acc = float(np.mean(gp == gt))
+            fpr = float(np.mean(gp[gt == 0] == 1)) if np.sum(gt == 0) > 0 else 0.0
+            fnr = float(np.mean(gp[gt == 1] == 0)) if np.sum(gt == 1) > 0 else 0.0
 
-    # Find best and worst
-    accs = {k: v["accuracy"] for k, v in group_perf.items()}
-    worst = min(accs, key=accs.get)
-    best  = max(accs, key=accs.get)
-    gap   = round(accs[best] - accs[worst], 4)
+            group_perf[label] = {
+                "accuracy": round(acc, 4),
+                "fpr": round(fpr, 4),
+                "fnr": round(fnr, 4),
+                "sample_size": int(np.sum(mask)),
+            }
 
-    # Single-axis gaps
-    single_gaps: Dict[str, float] = {}
-    for a, arr in zip(axes, axis_arrays):
-        vals = np.unique(arr)
-        if len(vals) >= 2:
-            g_accs = [float(np.mean(y_pred[arr == v] == y_true[arr == v]))
-                      for v in vals if np.sum(arr == v) >= min_group_size]
-            if len(g_accs) >= 2:
-                single_gaps[a] = round(max(g_accs) - min(g_accs), 4)
+        # Compute single-axis gaps
+        single_axis_gaps: Dict[str, float] = {}
+        for axis_name, axis_arr in demographic_axes.items():
+            axis_accs = []
+            for val in np.unique(axis_arr):
+                mask = (axis_arr == val)
+                if np.sum(mask) >= min_group_size:
+                    axis_accs.append(float(np.mean(y_pred[mask] == y_true[mask])))
+            if len(axis_accs) >= 2:
+                single_axis_gaps[axis_name] = round(max(axis_accs) - min(axis_accs), 4)
 
-    max_single = max(single_gaps.values()) if single_gaps else 0.0
-    amplification = round(gap / (max_single + 1e-8), 3)
+        # Intersectional gaps and worst/best group identifying
+        acc_map = {lbl: perf["accuracy"] for lbl, perf in group_perf.items()}
+        best_group = max(acc_map, key=acc_map.get)
+        worst_group = min(acc_map, key=acc_map.get)
+        intersectional_gap = round(acc_map[best_group] - acc_map[worst_group], 4)
 
-    narrative = (
-        f"Intersectional analysis across {len(axes)} axes ({', '.join(axes)}) "
-        f"reveals {len(group_perf)} compound groups. "
-        f"The worst-performing group ({worst}) achieves {accs[worst]:.1%} accuracy "
-        f"vs {accs[best]:.1%} for the best ({best}) — a gap of {gap:.1%}. "
-        f"This is {amplification:.1f}× larger than the largest single-axis gap "
-        f"({max_single:.1%}), demonstrating compound disadvantage."
-    )
+        max_single_gap = max(single_axis_gaps.values()) if single_axis_gaps else 0.001
+        amplification = round(intersectional_gap / max(max_single_gap, 1e-4), 2)
 
-    logger.info(f"[XAI] Intersectional fairness: gap={gap:.3f}, amplification={amplification:.2f}x")
-    return IntersectionalFairnessResult(
-        axes=axes,
-        group_performances=group_perf,
-        worst_intersectional_group=worst,
-        best_intersectional_group=best,
-        intersectional_gap=gap,
-        single_axis_gaps=single_gaps,
-        amplification_factor=amplification,
-        narrative=narrative,
-    )
+        narrative = (
+            f"Intersectional disparity gap is {intersectional_gap:.1%}, with '{worst_group}' "
+            f"performing lowest ({acc_map[worst_group]:.1%}) and '{best_group}' performing highest "
+            f"({acc_map[best_group]:.1%}). Intersectional analysis revealed {amplification}x "
+            f"compounded bias compared to single-axis analysis."
+        )
 
+        logger.info(f"[XAI] Intersectional analysis completed across {len(group_perf)} compound groups.")
+
+        return IntersectionalFairnessResult(
+            axes=axes,
+            group_performances=group_perf,
+            worst_intersectional_group=worst_group,
+            best_intersectional_group=best_group,
+            intersectional_gap=intersectional_gap,
+            single_axis_gaps=single_axis_gaps,
+            amplification_factor=amplification,
+            narrative=narrative,
+        )
 
 # ── Compliance report generator ───────────────────────────────────────────────
 
@@ -6175,7 +6610,20 @@ def generate_health_finance_data(
     feat_names = _HEALTH_FEATURES[domain][:X.shape[1]]
     return X, outcome, demo, feat_names, preset
 
-
+def simulate_deepfake(self, X, y, domain="health"):
+    templates = getattr(self, "VR_SCENARIO_TEMPLATES", None) or {}
+    vr = (
+        templates.get(domain)
+        or templates.get("health")
+        or templates.get("security")
+        or templates.get("default")
+        or {
+            "title": "Synthetic deepfake stress test",
+            "setting": domain,
+            "narrative": "No VR template registered for this domain; using a generic clinical/security probe.",
+        }
+    )
+    # ... rest of the method unchanged, use `vr` as before
 # ── §25B.4  Health Fairness Calculator ────────────────────────────────────────
 def calculate_health_finance_fairness(
     y_true: np.ndarray,

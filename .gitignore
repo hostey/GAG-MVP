@@ -62,3 +62,7 @@ exports/
 # Database
 *.db
 *.sqlite
+
+
+
+.streamlit/secrets.toml
