@@ -1,6 +1,6 @@
 # pages/1_🏥_Healthcare_Equity.py
 """
-Healthcare Equity Simulation — GAGS Framework v1.0 | Article 1 Research v9
+Healthcare Equity Simulation — GAGS Framework v1.0 | Article 1 Research v8
 
 Refactored to integrate all five feature modules from simulation_core.py:
   Feature 1 — AI Agent Economy Sandbox  (resource auction in healthcare domain)
@@ -11,7 +11,6 @@ Refactored to integrate all five feature modules from simulation_core.py:
 """
 
 import json
-import os
 from datetime import datetime, date
 import warnings
 import time
@@ -771,27 +770,11 @@ class HealthcareHybridPipeline:
     def load_heart_disease_uci(_self, n_samples: int = 5000):
         rng = np.random.default_rng(42)
         try:
+            url = ("https://archive.ics.uci.edu/ml/machine-learning-databases/"
+                   "heart-disease/processed.cleveland.data")
             cols = ["age", "sex", "cp", "trestbps", "chol", "fbs", "restecg",
                     "thalach", "exang", "oldpeak", "slope", "ca", "thal", "target"]
-            # Publication reproducibility: prefer an explicitly supplied/local cached
-            # Cleveland file before attempting the network. Set GAGS_UCI_HEART_PATH
-            # or place processed.cleveland.data in ./data or the working directory.
-            local_candidates = [
-                os.environ.get("GAGS_UCI_HEART_PATH", "").strip(),
-                "data/processed.cleveland.data",
-                "processed.cleveland.data",
-                "/mnt/data/processed.cleveland.data",
-            ]
-            local_path = next((p for p in local_candidates if p and os.path.isfile(p)), None)
-            if local_path:
-                df = pd.read_csv(local_path, names=cols, na_values="?").dropna()
-                source_note = f"local:{local_path}"
-            else:
-                url = ("https://archive.ics.uci.edu/ml/machine-learning-databases/"
-                       "heart-disease/processed.cleveland.data")
-                df = pd.read_csv(url, names=cols, na_values="?").dropna()
-                source_note = url
-            df.attrs["source_note"] = source_note
+            df = pd.read_csv(url, names=cols, na_values="?").dropna()
             df["target"] = (df["target"] > 0).astype(int)
             n = min(len(df), n_samples)
             if len(df) > n:
@@ -1537,13 +1520,6 @@ def _run_one(
         demo = rng.integers(0, 2, size=len(df_ds))
 
     excluded = {"target", "demographic_group", "_africa_centric", "_description"}
-    # Publication safeguard: for external/real benchmark datasets, the simulated
-    # socioeconomic/access fields are contextual variables only. They must not
-    # become clinical predictors, otherwise the algorithmic and geographic layers
-    # are mechanically entangled by construction.
-    simulated_context_cols = {"income_level", "insurance", "access_score", "education_level"}
-    model_excluded_context = sorted(c for c in simulated_context_cols if c in df_ds.columns) if data_source != "Synthetic Only" else []
-    excluded.update(model_excluded_context)
     feat_cols = [c for c in df_ds.columns if c not in excluded]
     numeric_cols = list(df_ds[feat_cols].select_dtypes(include=[np.number]).columns)
     if not numeric_cols:
@@ -1630,9 +1606,8 @@ def _run_one(
         "dataset": data_source, "dataset_kind": dataset_kind,
         "feature_names": numeric_cols,
         "synthetic_equity_attributes": [c for c in ["income_level", "insurance", "access_score", "education_level"] if c in df_ds.columns],
-        "model_excluded_simulated_context": model_excluded_context,
         "simulation_attributes": ["access_inequality", "bias_intensity", "poison_rate"],
-        "note": "For external/real clinical benchmarks, simulated socioeconomic/access attributes are retained as context but excluded from clinical model predictors."
+        "note": "Real clinical data may have simulated socioeconomic/access attributes; fairness findings are conditional on those attributes."
     }
 
     return {
