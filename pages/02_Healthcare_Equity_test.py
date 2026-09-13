@@ -1,6 +1,6 @@
 # pages/1_🏥_Healthcare_Equity.py
 """
-Healthcare Equity Simulation — GAGS Framework v1.0 | Article 1 Research v9
+Healthcare Equity Simulation — GAGS Framework v1.0
 
 Refactored to integrate all five feature modules from simulation_core.py:
   Feature 1 — AI Agent Economy Sandbox  (resource auction in healthcare domain)
@@ -11,14 +11,13 @@ Refactored to integrate all five feature modules from simulation_core.py:
 """
 
 import json
-import os
 from datetime import datetime, date
 import warnings
 import time
 import re
 import hashlib
 import uuid
-from dataclasses import dataclass, asdict, replace
+from dataclasses import dataclass, asdict
 
 import numpy as np
 import pandas as pd
@@ -435,308 +434,6 @@ class ModelArtifact:
     threshold: float
 
 
-@dataclass(frozen=True)
-class Article1ReferralConfig:
-    """Research configuration for Article 1 referral-access coupling.
-
-    Article 1 uses a prespecified screen-to-referral simulation policy: patients
-    with the benchmark-positive disease label are considered eligible for
-    higher-level diagnostic assessment. This is a research policy assumption,
-    not an emergency-triage rule and not a patient-specific clinical referral
-    recommendation.
-    """
-    enabled: bool = False
-    travel_threshold_min: float = 60.0
-    eligible_types: tuple = ("Secondary", "Tertiary")
-    functional_statuses: tuple = ("Functional",)
-    routing_method: str = "geodesic_proxy"  # geodesic_proxy | osrm
-    assumed_speed_kmh: float = 40.0
-    origin_mode: str = "primary_facility_proxy"
-    group_location_coupling: float = 0.0
-    referral_policy: str = "screen_positive_to_diagnostic_assessment"
-
-    def validate(self):
-        if self.travel_threshold_min <= 0:
-            raise ValueError("Article 1 travel threshold must be > 0 minutes.")
-        if self.routing_method not in {"geodesic_proxy", "osrm"}:
-            raise ValueError("routing_method must be 'geodesic_proxy' or 'osrm'.")
-        if self.assumed_speed_kmh <= 0:
-            raise ValueError("assumed_speed_kmh must be > 0.")
-        if not 0 <= self.group_location_coupling <= 1:
-            raise ValueError("group_location_coupling must be between 0 and 1.")
-        if self.referral_policy != "screen_positive_to_diagnostic_assessment":
-            raise ValueError("Article 1 currently implements only the prespecified screen-to-referral diagnostic-assessment policy.")
-
-
-def _normalize_grid3_for_article1(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize the nationwide GRID3 facility schema used by Article 1.
-
-    This function does not infer service capability. Eligibility is based only on
-    the uploaded facility level/type and functional-status fields.
-    """
-    if df is None or df.empty:
-        raise ValueError("Article 1 requires a non-empty facility dataset.")
-    out = df.copy()
-    lookup = {str(c).strip().lower(): c for c in out.columns}
-
-    def pick(*names):
-        for name in names:
-            if name.lower() in lookup:
-                return lookup[name.lower()]
-        return None
-
-    lat = pick("latitude", "lat", "y")
-    lon = pick("longitude", "lon", "lng", "x")
-    typ = pick("type", "facility_tier", "tier", "level")
-    status = pick("func_stats", "functional_status", "status")
-    name = pick("prmry_name", "facility_name", "name", "alt_name")
-    state = pick("statename", "state")
-    lga = pick("lganame", "lga")
-    uid = pick("uniq_id", "fid", "globalid")
-    required = {"latitude": lat, "longitude": lon, "type": typ, "functional_status": status}
-    missing = [k for k, v in required.items() if v is None]
-    if missing:
-        raise ValueError(f"Facility dataset is missing required Article 1 fields: {', '.join(missing)}")
-
-    norm = pd.DataFrame({
-        "facility_id": out[uid].astype(str) if uid else np.arange(len(out)).astype(str),
-        "facility_name": out[name].astype(str) if name else "Unnamed facility",
-        "lat": pd.to_numeric(out[lat], errors="coerce"),
-        "lon": pd.to_numeric(out[lon], errors="coerce"),
-        "facility_type": out[typ].astype(str).str.strip(),
-        "functional_status": out[status].astype(str).str.strip(),
-        "state": out[state].astype(str) if state else "Unknown",
-        "lga": out[lga].astype(str) if lga else "Unknown",
-    }).dropna(subset=["lat", "lon"])
-    norm = norm[norm["lat"].between(-90, 90) & norm["lon"].between(-180, 180)].copy()
-    if norm.empty:
-        raise ValueError("No valid facility coordinates remain after normalization.")
-    return norm.reset_index(drop=True)
-
-
-def _haversine_vector_km(lat, lon, lat_arr, lon_arr):
-    lat1 = np.radians(float(lat))
-    lon1 = np.radians(float(lon))
-    lat2 = np.radians(np.asarray(lat_arr, dtype=float))
-    lon2 = np.radians(np.asarray(lon_arr, dtype=float))
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    return 6371.0088 * (2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a)))
-
-
-def _article1_origin_pool(facilities: pd.DataFrame, cfg: Article1ReferralConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
-    eligible = facilities[
-        facilities["facility_type"].str.casefold().isin({x.casefold() for x in cfg.eligible_types})
-        & facilities["functional_status"].str.casefold().isin({x.casefold() for x in cfg.functional_statuses})
-    ].copy()
-    origins = facilities[
-        facilities["facility_type"].str.casefold().eq("primary")
-        & facilities["functional_status"].str.casefold().isin({x.casefold() for x in cfg.functional_statuses})
-    ].copy()
-    if eligible.empty:
-        raise ValueError("No eligible functional secondary/tertiary referral facilities were found.")
-    if origins.empty:
-        raise ValueError("No functional primary facilities were found for patient-origin proxies.")
-    return origins.reset_index(drop=True), eligible.reset_index(drop=True)
-
-
-def _precompute_origin_access(origins: pd.DataFrame, eligible: pd.DataFrame) -> pd.DataFrame:
-    """Attach nearest eligible higher-level facility using geodesic preselection."""
-    e_lat = eligible["lat"].to_numpy()
-    e_lon = eligible["lon"].to_numpy()
-    rows = []
-    for row in origins.itertuples(index=False):
-        d = _haversine_vector_km(row.lat, row.lon, e_lat, e_lon)
-        j = int(np.argmin(d))
-        dest = eligible.iloc[j]
-        rows.append({
-            "origin_facility_id": row.facility_id,
-            "origin_facility_name": row.facility_name,
-            "origin_lat": float(row.lat), "origin_lon": float(row.lon),
-            "origin_state": row.state, "origin_lga": row.lga,
-            "referral_facility_id": dest["facility_id"],
-            "referral_facility_name": dest["facility_name"],
-            "referral_facility_type": dest["facility_type"],
-            "referral_lat": float(dest["lat"]), "referral_lon": float(dest["lon"]),
-            "straight_line_km": float(d[j]),
-        })
-    return pd.DataFrame(rows)
-
-
-@st.cache_data(show_spinner="Precomputing Article 1 referral geography...")
-def _prepare_article1_facility_access_cached(
-        facilities_df: pd.DataFrame, eligible_types: tuple, functional_statuses: tuple
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Normalize/filter GRID3 and cache the expensive primary-to-referral lookup.
-
-    Geography is invariant across simulation seeds when the uploaded facility
-    dataset and eligibility definition are unchanged, so recomputing this table
-    for every run wastes time without changing the experiment.
-    """
-    cache_cfg = Article1ReferralConfig(
-        enabled=True,
-        eligible_types=tuple(eligible_types),
-        functional_statuses=tuple(functional_statuses),
-    )
-    facilities = _normalize_grid3_for_article1(facilities_df)
-    origins, eligible = _article1_origin_pool(facilities, cache_cfg)
-    access = _precompute_origin_access(origins, eligible)
-    return origins, eligible, access
-
-
-def _article1_route_time(row: pd.Series, cfg: Article1ReferralConfig) -> tuple[float, str]:
-    if cfg.routing_method == "geodesic_proxy":
-        # Development/sensitivity proxy only; never label this as road-network time.
-        return float(row["straight_line_km"] / cfg.assumed_speed_kmh * 60.0), "geodesic_speed_proxy"
-
-    try:
-        routed = get_osrm_route_distance_and_time(
-            float(row["origin_lat"]), float(row["origin_lon"]),
-            float(row["referral_lat"]), float(row["referral_lon"]),
-        )
-    except Exception as exc:
-        raise RuntimeError(f"OSRM routing failed for Article 1; no proxy fallback was substituted: {exc}") from exc
-
-    if isinstance(routed, dict):
-        for key in ("travel_time_min", "duration_min", "time_min", "minutes"):
-            if key in routed:
-                return float(routed[key]), "osrm"
-        if "duration" in routed:
-            val = float(routed["duration"])
-            return (val / 60.0 if val > 300 else val), "osrm"
-    if isinstance(routed, (tuple, list)) and len(routed) >= 2:
-        val = float(routed[1])
-        return (val / 60.0 if val > 300 else val), "osrm"
-    if np.isscalar(routed):
-        val = float(routed)
-        return (val / 60.0 if val > 300 else val), "osrm"
-    raise RuntimeError("OSRM helper returned an unrecognized result; Article 1 did not substitute a proxy.")
-
-
-def _run_article1_joint_burden(
-        artifact: ModelArtifact, facilities_df: pd.DataFrame,
-        cfg: Article1ReferralConfig, seed: int) -> tuple[dict, pd.DataFrame]:
-    """Couple model misses to referral geography for Article 1.
-
-    The primary Article 1 estimand is defined under a prespecified
-    screen-to-referral policy: y_test==1 denotes eligibility for higher-level
-    diagnostic assessment, while a model-negative prediction represents a missed
-    referral opportunity. This is not an emergency-triage or urgency rule.
-    """
-    cfg.validate()
-    origins, eligible, access = _prepare_article1_facility_access_cached(
-        facilities_df, tuple(cfg.eligible_types), tuple(cfg.functional_statuses)
-    )
-    if access.empty:
-        raise ValueError("Article 1 origin-access table is empty.")
-
-    # Rank primary-care origins by distance to higher-level care. Coupling=0 gives
-    # independent random geography. Higher values intentionally create a controlled
-    # structural-access scenario and are recorded as simulation assumptions.
-    access = access.sort_values("straight_line_km").reset_index(drop=True)
-    half = max(1, len(access) // 2)
-    better_access = access.iloc[:half]
-    worse_access = access.iloc[half:] if len(access) > half else access.iloc[:half]
-    rng = np.random.default_rng(int(seed) + 701)
-
-    y_true = np.asarray(artifact.y_test).astype(int)
-    y_pred = np.asarray(artifact.y_prediction).astype(int)
-    y_prob = np.asarray(artifact.y_probability, dtype=float)
-    groups = np.asarray(artifact.demo_test)
-
-    # Common-random-number design for coupling experiments. For a given seed,
-    # every lambda scenario receives the same latent random draws. Lambda changes
-    # only whether a patient uses the structural pool versus the all-origin pool;
-    # it does not generate a fresh stochastic realization for each scenario.
-    n_patients = len(groups)
-    u_structural = rng.random(n_patients)
-    u_all_origin = rng.random(n_patients)
-    u_structural_origin = rng.random(n_patients)
-    assigned = []
-    for idx, g in enumerate(groups):
-        use_structural = u_structural[idx] < cfg.group_location_coupling
-        if use_structural:
-            pool = worse_access if str(g) in {"0", "0.0"} else better_access
-            u_pick = u_structural_origin[idx]
-        else:
-            pool = access
-            u_pick = u_all_origin[idx]
-        j = min(int(u_pick * len(pool)), len(pool) - 1)
-        assigned.append(pool.iloc[j])
-    assigned_df = pd.DataFrame(assigned).reset_index(drop=True)
-
-    travel = []
-    methods = []
-    # Route each unique origin-destination pair once per run.
-    route_cache = {}
-    for _, row in assigned_df.iterrows():
-        key = (row["origin_facility_id"], row["referral_facility_id"], cfg.routing_method)
-        if key not in route_cache:
-            route_cache[key] = _article1_route_time(row, cfg)
-        t, method = route_cache[key]
-        travel.append(t); methods.append(method)
-
-    rec = pd.DataFrame({
-        "patient_index": np.arange(len(y_true), dtype=int),
-        "group": groups,
-        "clinical_target_y": y_true,
-        "referral_eligible_r": y_true,  # prespecified screen-to-referral policy
-        "predicted_positive": y_pred,
-        "prediction_probability": y_prob,
-        "missed_referral_opportunity_m": ((y_true == 1) & (y_pred == 0)).astype(int),
-        "travel_time_min": np.asarray(travel, dtype=float),
-        "geographic_constraint_c": (np.asarray(travel, dtype=float) > cfg.travel_threshold_min).astype(int),
-        "routing_method": methods,
-    })
-    rec = pd.concat([rec, assigned_df.reset_index(drop=True)], axis=1)
-    rec["joint_burden_j"] = ((rec["missed_referral_opportunity_m"] == 1) & (rec["geographic_constraint_c"] == 1)).astype(int)
-
-    subgroup = {}
-    for g in pd.unique(rec["group"]):
-        d = rec[(rec["group"] == g) & (rec["referral_eligible_r"] == 1)].copy()
-        if d.empty:
-            continue
-        fnr = float(d["missed_referral_opportunity_m"].mean())
-        c_rate = float(d["geographic_constraint_c"].mean())
-        joint = float(d["joint_burden_j"].mean())
-        expected = fnr * c_rate
-        excess = joint - expected
-        c1 = d[d["geographic_constraint_c"] == 1]
-        c0 = d[d["geographic_constraint_c"] == 0]
-        d_gap = float(c1["missed_referral_opportunity_m"].mean() - c0["missed_referral_opportunity_m"].mean()) if (not c1.empty and not c0.empty) else np.nan
-        subgroup[str(g)] = {
-            "n_referral_eligible": int(len(d)), "fnr": fnr, "constraint_rate": c_rate,
-            "joint_burden": joint, "independence_expected": expected,
-            "excess_beyond_independence": excess, "dependence_gap": d_gap,
-        }
-
-    group_keys = list(subgroup)
-    delta_joint = None
-    if len(group_keys) >= 2:
-        delta_joint = float(subgroup[group_keys[0]]["joint_burden"] - subgroup[group_keys[1]]["joint_burden"])
-
-    summary = {
-        "enabled": True,
-        "analysis_population": "R=1: benchmark-positive patients eligible for higher-level diagnostic assessment under the prespecified screen-to-referral simulation policy",
-        "referral_policy": "screen_positive_to_diagnostic_assessment",
-        "referral_policy_scope": "research simulation policy; not emergency triage and not an individualized clinical recommendation",
-        "travel_threshold_min": float(cfg.travel_threshold_min),
-        "routing_method_requested": cfg.routing_method,
-        "routing_method_observed": sorted(set(methods)),
-        "eligible_referral_types": list(cfg.eligible_types),
-        "functional_statuses": list(cfg.functional_statuses),
-        "n_primary_origin_facilities": int(len(origins)),
-        "n_eligible_referral_facilities": int(len(eligible)),
-        "facility_access_precompute_cached": True,
-        "group_location_coupling": float(cfg.group_location_coupling),
-        "subgroups": subgroup,
-        "delta_joint_first_minus_second": delta_joint,
-        "warning": "Article 1 is a simulation/audit testbed. R=1 is defined by a prespecified screen-to-referral diagnostic-assessment policy; it must not be interpreted as emergency referral urgency.",
-    }
-    return summary, rec
-
-
 # ── Hybrid Data Pipeline ───────────────────────────────────────────────────────
 class HealthcareHybridPipeline:
     def __init__(self):
@@ -771,27 +468,11 @@ class HealthcareHybridPipeline:
     def load_heart_disease_uci(_self, n_samples: int = 5000):
         rng = np.random.default_rng(42)
         try:
+            url = ("https://archive.ics.uci.edu/ml/machine-learning-databases/"
+                   "heart-disease/processed.cleveland.data")
             cols = ["age", "sex", "cp", "trestbps", "chol", "fbs", "restecg",
                     "thalach", "exang", "oldpeak", "slope", "ca", "thal", "target"]
-            # Publication reproducibility: prefer an explicitly supplied/local cached
-            # Cleveland file before attempting the network. Set GAGS_UCI_HEART_PATH
-            # or place processed.cleveland.data in ./data or the working directory.
-            local_candidates = [
-                os.environ.get("GAGS_UCI_HEART_PATH", "").strip(),
-                "data/processed.cleveland.data",
-                "processed.cleveland.data",
-                "/mnt/data/processed.cleveland.data",
-            ]
-            local_path = next((p for p in local_candidates if p and os.path.isfile(p)), None)
-            if local_path:
-                df = pd.read_csv(local_path, names=cols, na_values="?").dropna()
-                source_note = f"local:{local_path}"
-            else:
-                url = ("https://archive.ics.uci.edu/ml/machine-learning-databases/"
-                       "heart-disease/processed.cleveland.data")
-                df = pd.read_csv(url, names=cols, na_values="?").dropna()
-                source_note = url
-            df.attrs["source_note"] = source_note
+            df = pd.read_csv(url, names=cols, na_values="?").dropna()
             df["target"] = (df["target"] > 0).astype(int)
             n = min(len(df), n_samples)
             if len(df) > n:
@@ -895,308 +576,6 @@ class HealthcareHybridPipeline:
 
 _pipeline = HealthcareHybridPipeline()
 
-
-def _summarize_article1_records_at_threshold(records: pd.DataFrame, threshold_min: float) -> list[dict]:
-    """Recompute Article 1 estimands at a travel-time threshold without rerouting.
-
-    This is intentionally a post-routing sensitivity calculation. It reuses each
-    patient's already-computed travel_time_min, changes only the definition of
-    geographic constraint C, and then recomputes J, J_ind, E, and D.
-    """
-    if records is None or records.empty:
-        return []
-    if "travel_time_min" not in records.columns:
-        raise ValueError("Article 1 threshold sensitivity requires travel_time_min in patient records.")
-    threshold_min = float(threshold_min)
-    if threshold_min <= 0:
-        raise ValueError("Article 1 sensitivity thresholds must be > 0 minutes.")
-
-    d = records.copy()
-    d = d[d["referral_eligible_r"] == 1].copy()
-    if d.empty:
-        return []
-    d["sensitivity_constraint_c"] = (pd.to_numeric(d["travel_time_min"], errors="coerce") > threshold_min).astype(int)
-    d["sensitivity_joint_j"] = (
-        (d["missed_referral_opportunity_m"].astype(int) == 1)
-        & (d["sensitivity_constraint_c"] == 1)
-    ).astype(int)
-
-    rows = []
-    group_values = list(d["group"].drop_duplicates())
-    for group_value in group_values + ["ALL"]:
-        g = d if group_value == "ALL" else d[d["group"] == group_value]
-        if g.empty:
-            continue
-        fnr = float(g["missed_referral_opportunity_m"].mean())
-        constraint = float(g["sensitivity_constraint_c"].mean())
-        joint = float(g["sensitivity_joint_j"].mean())
-        independence = fnr * constraint
-        constrained = g[g["sensitivity_constraint_c"] == 1]
-        accessible = g[g["sensitivity_constraint_c"] == 0]
-        dependence = (
-            float(constrained["missed_referral_opportunity_m"].mean())
-            - float(accessible["missed_referral_opportunity_m"].mean())
-        ) if len(constrained) and len(accessible) else np.nan
-        rows.append({
-            "threshold_min": threshold_min,
-            "group": group_value,
-            "n_referral_eligible": int(len(g)),
-            "fnr_missed_referral": fnr,
-            "geographic_constraint": constraint,
-            "joint_burden_j": joint,
-            "independence_j_ind": independence,
-            "excess_e": joint - independence,
-            "dependence_d": dependence,
-        })
-    return rows
-
-
-
-def _article1_summarize_counterfactual(records: pd.DataFrame, scenario: str) -> list[dict]:
-    """Summarize one S0-S3 counterfactual scenario on the R=1 population."""
-    if records is None or records.empty:
-        return []
-    d = records[records["referral_eligible_r"] == 1].copy()
-    if d.empty:
-        return []
-    rows = []
-    groups = list(d["group"].drop_duplicates())
-    for group_value in groups + ["ALL"]:
-        g = d if group_value == "ALL" else d[d["group"] == group_value]
-        if g.empty:
-            continue
-        fnr = float(g["cf_missed_referral_m"].mean())
-        constraint = float(g["cf_geographic_constraint_c"].mean())
-        joint = float(g["cf_joint_burden_j"].mean())
-        expected = fnr * constraint
-        c1 = g[g["cf_geographic_constraint_c"] == 1]
-        c0 = g[g["cf_geographic_constraint_c"] == 0]
-        dependence = (
-            float(c1["cf_missed_referral_m"].mean()) - float(c0["cf_missed_referral_m"].mean())
-        ) if len(c1) and len(c0) else np.nan
-        rows.append({
-            "scenario": scenario,
-            "group": str(group_value),
-            "n_referral_eligible": int(len(g)),
-            "fnr_missed_referral": fnr,
-            "geographic_constraint": constraint,
-            "joint_burden_j": joint,
-            "independence_j_ind": expected,
-            "excess_e": joint - expected,
-            "dependence_d": dependence,
-        })
-    return rows
-
-
-def _run_article1_s0_s3_interventions(
-        records: pd.DataFrame,
-        travel_threshold_min: float,
-        ai_gap_closure: float = 1.0,
-        geography_time_reduction: float = 0.25,
-) -> tuple[list[dict], pd.DataFrame]:
-    """Run S0-S3 counterfactual interventions on fixed patient-level pathways.
-
-    S0: baseline predictions + baseline geography.
-    S1: algorithmic counterfactual only. Close ``ai_gap_closure`` fraction of the
-        baseline FNR gap by converting the highest-probability missed positives in
-        the higher-FNR subgroup into detected positives. This is an auditable
-        counterfactual error-repair policy, not a claim about a deployed mitigation.
-    S2: geography counterfactual only. Reduce all referral travel times by the
-        prespecified proportional amount while holding predictions fixed.
-    S3: combine S1 and S2.
-
-    All four scenarios operate on the same patients, labels, baseline predictions,
-    facility matches, and baseline travel-time estimates.
-    """
-    if records is None or records.empty:
-        return [], pd.DataFrame()
-    if not 0 <= float(ai_gap_closure) <= 1:
-        raise ValueError("ai_gap_closure must be between 0 and 1.")
-    if not 0 <= float(geography_time_reduction) < 1:
-        raise ValueError("geography_time_reduction must be in [0,1).")
-    if float(travel_threshold_min) <= 0:
-        raise ValueError("travel_threshold_min must be > 0.")
-
-    base = records.copy().reset_index(drop=True)
-    required = {
-        "referral_eligible_r", "missed_referral_opportunity_m", "travel_time_min",
-        "prediction_probability", "group"
-    }
-    missing = sorted(required.difference(base.columns))
-    if missing:
-        raise ValueError(f"S0-S3 intervention suite missing required columns: {', '.join(missing)}")
-
-    eligible = base[base["referral_eligible_r"] == 1].copy()
-    fnr_by_group = eligible.groupby("group")["missed_referral_opportunity_m"].mean()
-    target_group = None
-    reference_fnr = np.nan
-    target_fnr = np.nan
-    n_repairs = 0
-    repair_indices = []
-    if len(fnr_by_group) >= 2:
-        target_group = fnr_by_group.idxmax()
-        target_fnr = float(fnr_by_group.max())
-        reference_fnr = float(fnr_by_group.min())
-        target_n = int((eligible["group"] == target_group).sum())
-        desired_fnr = target_fnr - float(ai_gap_closure) * (target_fnr - reference_fnr)
-        current_misses = int(((eligible["group"] == target_group) & (eligible["missed_referral_opportunity_m"] == 1)).sum())
-        desired_misses = int(round(desired_fnr * target_n))
-        n_repairs = max(0, current_misses - desired_misses)
-        candidates = eligible[
-            (eligible["group"] == target_group)
-            & (eligible["missed_referral_opportunity_m"] == 1)
-        ].sort_values(["prediction_probability"], ascending=False)
-        repair_indices = list(candidates.head(n_repairs).index)
-
-    scenarios = []
-    patient_frames = []
-    for scenario, use_ai, use_geo in [
-        ("S0 Baseline", False, False),
-        ("S1 AI improvement", True, False),
-        ("S2 Geography improvement", False, True),
-        ("S3 Combined improvement", True, True),
-    ]:
-        d = base.copy()
-        d["cf_missed_referral_m"] = d["missed_referral_opportunity_m"].astype(int)
-        d["cf_travel_time_min"] = pd.to_numeric(d["travel_time_min"], errors="coerce")
-        if use_ai and repair_indices:
-            d.loc[repair_indices, "cf_missed_referral_m"] = 0
-        if use_geo:
-            d["cf_travel_time_min"] = d["cf_travel_time_min"] * (1.0 - float(geography_time_reduction))
-        d["cf_geographic_constraint_c"] = (d["cf_travel_time_min"] > float(travel_threshold_min)).astype(int)
-        d["cf_joint_burden_j"] = (
-            (d["cf_missed_referral_m"] == 1) & (d["cf_geographic_constraint_c"] == 1)
-        ).astype(int)
-        d["scenario"] = scenario
-        d["ai_intervention_applied"] = bool(use_ai)
-        d["geography_intervention_applied"] = bool(use_geo)
-        patient_frames.append(d)
-        scenarios.extend(_article1_summarize_counterfactual(d, scenario))
-
-    meta = {
-        "scenario": "INTERVENTION_METADATA",
-        "group": "ALL",
-        "n_referral_eligible": int(len(eligible)),
-        "fnr_missed_referral": np.nan,
-        "geographic_constraint": np.nan,
-        "joint_burden_j": np.nan,
-        "independence_j_ind": np.nan,
-        "excess_e": np.nan,
-        "dependence_d": np.nan,
-        "ai_target_group": str(target_group) if target_group is not None else None,
-        "baseline_target_group_fnr": target_fnr,
-        "baseline_reference_fnr": reference_fnr,
-        "ai_gap_closure": float(ai_gap_closure),
-        "ai_repaired_missed_referrals": int(n_repairs),
-        "geography_time_reduction": float(geography_time_reduction),
-        "travel_threshold_min": float(travel_threshold_min),
-        "intervention_scope": "simulation counterfactual; not a causal estimate or implemented policy",
-    }
-    scenarios.append(meta)
-    return scenarios, pd.concat(patient_frames, ignore_index=True)
-
-
-
-def _article1_tidy_from_result(result: dict, model_variant: str) -> list[dict]:
-    """Convert one repeated-seed result into tidy Article 1 estimand rows."""
-    summary = result.get("article1_summary") or {}
-    rows = []
-    balanced_accuracy = 0.5 * (float(result.get("sensitivity", np.nan)) + float(result.get("specificity", np.nan)))
-    subgroups = summary.get("subgroups") or {}
-    for group, values in subgroups.items():
-        rows.append({
-            "run_id": int(result.get("run_id", 0)),
-            "seed": int(result.get("seed", 0)),
-            "model_variant": str(model_variant),
-            "group": str(group),
-            "n_referral_eligible": int(values.get("n_referral_eligible", 0)),
-            "fnr_missed_referral": float(values.get("fnr", np.nan)),
-            "geographic_constraint": float(values.get("constraint_rate", np.nan)),
-            "joint_burden_j": float(values.get("joint_burden", np.nan)),
-            "independence_j_ind": float(values.get("independence_expected", np.nan)),
-            "excess_e": float(values.get("excess_beyond_independence", np.nan)),
-            "dependence_d": float(values.get("dependence_gap", np.nan)) if pd.notna(values.get("dependence_gap", np.nan)) else np.nan,
-            "accuracy": float(result.get("accuracy", np.nan)),
-            "auc": float(result.get("auc", np.nan)),
-            "balanced_accuracy": float(balanced_accuracy),
-            "sensitivity": float(result.get("sensitivity", np.nan)),
-            "specificity": float(result.get("specificity", np.nan)),
-            "travel_threshold_min": float(summary.get("travel_threshold_min", np.nan)),
-            "routing_method": ",".join(map(str, summary.get("routing_method_observed", []))),
-            "group_location_coupling": float(summary.get("group_location_coupling", np.nan)),
-        })
-    return rows
-
-
-def _article1_run_level_bootstrap_ci(tidy: pd.DataFrame, n_boot: int = 1000, seed: int = 20260912) -> pd.DataFrame:
-    """Bootstrap repeated-seed estimands at the run level.
-
-    Resampling whole run IDs preserves within-run patient dependence and reflects
-    retraining/test-split variability. CIs are descriptive simulation uncertainty,
-    not population-representative confidence intervals for Nigeria.
-    """
-    if tidy is None or tidy.empty:
-        return pd.DataFrame()
-    metrics = ["fnr_missed_referral", "geographic_constraint", "joint_burden_j", "independence_j_ind", "excess_e", "dependence_d"]
-    out = []
-    rng = np.random.default_rng(int(seed))
-    for (variant, group), d in tidy.groupby(["model_variant", "group"], dropna=False):
-        run_ids = np.array(sorted(d["run_id"].dropna().unique()))
-        if len(run_ids) == 0:
-            continue
-        per_run = d.groupby("run_id", as_index=False)[metrics].mean(numeric_only=True).set_index("run_id")
-        for metric in metrics:
-            vals = per_run[metric].dropna()
-            if vals.empty:
-                continue
-            point = float(vals.mean())
-            if len(vals) < 2 or int(n_boot) < 20:
-                lo = hi = np.nan
-            else:
-                arr = vals.to_numpy(dtype=float)
-                boot = np.empty(int(n_boot), dtype=float)
-                for b in range(int(n_boot)):
-                    boot[b] = float(rng.choice(arr, size=len(arr), replace=True).mean())
-                lo, hi = [float(x) for x in np.quantile(boot, [0.025, 0.975])]
-            out.append({
-                "model_variant": str(variant), "group": str(group), "metric": metric,
-                "estimate": point, "ci95_low": lo, "ci95_high": hi,
-                "n_runs": int(len(vals)), "bootstrap_reps": int(n_boot),
-                "bootstrap_unit": "run/seed",
-            })
-    return pd.DataFrame(out)
-
-
-def _article1_performance_match_table(model_rows: pd.DataFrame, tolerance: float = 0.03) -> pd.DataFrame:
-    """Flag model variants whose aggregate predictive performance matches baseline.
-
-    Matching requires absolute mean differences from baseline within ``tolerance``
-    simultaneously for accuracy, AUROC, and balanced accuracy.
-    """
-    if model_rows is None or model_rows.empty:
-        return pd.DataFrame()
-    perf_cols = ["accuracy", "auc", "balanced_accuracy", "sensitivity", "specificity"]
-    perf = model_rows.groupby("model_variant", as_index=False)[perf_cols].mean(numeric_only=True)
-    baseline = perf[perf["model_variant"] == "none"]
-    if baseline.empty:
-        baseline = perf.iloc[[0]]
-    b = baseline.iloc[0]
-    rows = []
-    for _, r in perf.iterrows():
-        da = abs(float(r["accuracy"]) - float(b["accuracy"]))
-        du = abs(float(r["auc"]) - float(b["auc"]))
-        db = abs(float(r["balanced_accuracy"]) - float(b["balanced_accuracy"]))
-        rows.append({
-            **{c: r[c] for c in perf.columns},
-            "delta_accuracy_vs_baseline": da,
-            "delta_auc_vs_baseline": du,
-            "delta_balanced_accuracy_vs_baseline": db,
-            "performance_tolerance": float(tolerance),
-            "performance_matched": bool(da <= tolerance and du <= tolerance and db <= tolerance),
-        })
-    return pd.DataFrame(rows)
-
-
 def init_health_session_state():
     """Initializes persistent sidebar configuration keys to prevent state loss on re-runs."""
     _hc_valid = list(simulation_config.BIAS_TYPES) + [b for b in ["gender", "linguistic"] if
@@ -1219,9 +598,6 @@ def init_health_session_state():
         "cfg_health_poison_rate": 0.05,
         "cfg_health_sample_size": 5000,
         "cfg_health_n_runs": 3,
-        "cfg_health_article1_intervention_enabled": True,
-        "cfg_health_article1_ai_gap_closure": 1.0,
-        "cfg_health_article1_geo_time_reduction": 0.25,
         "cfg_health_season_profile": "Dry Season",
         "cfg_health_terrain_type": "Rural Unpaved",
         "cfg_health_llm_provider": "Groq (Llama 3.3 / 3.1)",
@@ -1248,9 +624,6 @@ def init_health_session_state():
          "health_spatial_report": {},
          "health_redteam_report": {},
          "health_experiment_config": {},
-         "health_article1_patient_records": [],
-         "health_article1_summary": {},
-         "health_article1_threshold_sensitivity": [],
         "health_real_models": {},
         "health_safety_report": {},
         "health_lifecycle_report": {},
@@ -1442,58 +815,13 @@ def _run_health_model_redteam(artifact: ModelArtifact) -> dict:
     return {"model_linked": True, "probes": probes, "note": "Controlled numeric perturbation probes; multimodal attacks remain in the separate feature module."}
 
 
-
-def _summarize_article1_coupling_scenario(summary: dict, records: pd.DataFrame, coupling: float) -> list[dict]:
-    """Return tidy subgroup/overall estimands for one coupling scenario.
-
-    The underlying model predictions are held fixed. Only the structural
-    patient-location assignment parameter lambda changes between scenarios.
-    """
-    if records is None or records.empty:
-        return []
-    d = records[records["referral_eligible_r"] == 1].copy()
-    if d.empty:
-        return []
-    rows = []
-    group_values = list(d["group"].drop_duplicates())
-    for group_value in group_values + ["ALL"]:
-        g = d if group_value == "ALL" else d[d["group"] == group_value]
-        if g.empty:
-            continue
-        fnr = float(g["missed_referral_opportunity_m"].mean())
-        constraint = float(g["geographic_constraint_c"].mean())
-        joint = float(g["joint_burden_j"].mean())
-        independence = fnr * constraint
-        constrained = g[g["geographic_constraint_c"] == 1]
-        accessible = g[g["geographic_constraint_c"] == 0]
-        dependence = (
-            float(constrained["missed_referral_opportunity_m"].mean())
-            - float(accessible["missed_referral_opportunity_m"].mean())
-        ) if len(constrained) and len(accessible) else np.nan
-        rows.append({
-            "coupling_lambda": float(coupling),
-            "group": str(group_value),
-            "n_referral_eligible": int(len(g)),
-            "fnr_missed_referral": fnr,
-            "geographic_constraint": constraint,
-            "joint_burden_j": joint,
-            "independence_j_ind": independence,
-            "excess_e": joint - independence,
-            "dependence_d": dependence,
-            "travel_threshold_min": float(summary.get("travel_threshold_min", np.nan)),
-            "routing_method_requested": summary.get("routing_method_requested"),
-            "routing_method_observed": summary.get("routing_method_observed"),
-        })
-    return rows
-
 def _run_one(
         data_source, n_samples, selected_biases, bias_intensity,
         poison_rate, access_inequality, run_idx,
         enable_redteam=False, enable_governance=True, governance_policy="majority_vote",
         enable_arena=False, enable_agent_economy=False, enable_gender_audit=True,
         selected_state="Nigeria (National Average)", low_income_ratio=0.40, uninsured_ratio=0.35,
-        mitigation_strategy="none", threshold=0.5, experiment_seed=42,
-        article1_config=None, article1_facilities=None):
+        mitigation_strategy="none", threshold=0.5, experiment_seed=42):
     """Single reproducible healthcare experiment. No silent synthetic fallback."""
     seed = int(experiment_seed) + int(run_idx)
     rng = np.random.default_rng(seed)
@@ -1537,13 +865,6 @@ def _run_one(
         demo = rng.integers(0, 2, size=len(df_ds))
 
     excluded = {"target", "demographic_group", "_africa_centric", "_description"}
-    # Publication safeguard: for external/real benchmark datasets, the simulated
-    # socioeconomic/access fields are contextual variables only. They must not
-    # become clinical predictors, otherwise the algorithmic and geographic layers
-    # are mechanically entangled by construction.
-    simulated_context_cols = {"income_level", "insurance", "access_score", "education_level"}
-    model_excluded_context = sorted(c for c in simulated_context_cols if c in df_ds.columns) if data_source != "Synthetic Only" else []
-    excluded.update(model_excluded_context)
     feat_cols = [c for c in df_ds.columns if c not in excluded]
     numeric_cols = list(df_ds[feat_cols].select_dtypes(include=[np.number]).columns)
     if not numeric_cols:
@@ -1588,15 +909,6 @@ def _run_one(
         tn, fp, fn, tp = [int(v) for v in cm]
         group_confusion[str(g)] = {"tn": tn, "fp": fp, "fn": fn, "tp": tp, "count": int(m.sum())}
 
-    article1_summary = {}
-    article1_patient_records = None
-    if article1_config is not None and getattr(article1_config, "enabled", False):
-        if article1_facilities is None or article1_facilities.empty:
-            raise ValueError("Article 1 is enabled but no GRID3/facility dataset was supplied.")
-        article1_summary, article1_patient_records = _run_article1_joint_burden(
-            artifact=artifact, facilities_df=article1_facilities, cfg=article1_config, seed=seed
-        )
-
     impact_mat = compute_clinical_impact_matrix(y_te, y_pred, demo_te)
     impact_mat["group_confusion"] = group_confusion
     impact_mat["fnr_gap_threshold"] = 0.05
@@ -1630,9 +942,8 @@ def _run_one(
         "dataset": data_source, "dataset_kind": dataset_kind,
         "feature_names": numeric_cols,
         "synthetic_equity_attributes": [c for c in ["income_level", "insurance", "access_score", "education_level"] if c in df_ds.columns],
-        "model_excluded_simulated_context": model_excluded_context,
         "simulation_attributes": ["access_inequality", "bias_intensity", "poison_rate"],
-        "note": "For external/real clinical benchmarks, simulated socioeconomic/access attributes are retained as context but excluded from clinical model predictors."
+        "note": "Real clinical data may have simulated socioeconomic/access attributes; fairness findings are conditional on those attributes."
     }
 
     return {
@@ -1661,8 +972,6 @@ def _run_one(
         "group_confusion": group_confusion, "impact_matrix": impact_mat,
         "mitigation_strategy": mitigation_strategy, "threshold": threshold,
         "model_artifact": artifact,
-        "article1_summary": article1_summary,
-        "article1_patient_records": article1_patient_records,
     }
 
 
@@ -1780,122 +1089,6 @@ with st.sidebar:
         n_runs = st.slider("Simulation Runs", 1, 8, key="cfg_health_n_runs")
 
     st.divider()
-    st.subheader("🔬 Article 1 Research Layer")
-    with st.expander("Referral Geography & Joint Burden", expanded=False):
-        article1_enabled = st.toggle(
-            "Enable Article 1 referral-access experiment", value=False,
-            key="cfg_health_article1_enabled"
-        )
-        article1_facility_upload = st.file_uploader(
-            "GRID3 / health-facility workbook (XLSX/CSV)",
-            type=["xlsx", "xls", "csv"], key="cfg_health_article1_facilities"
-        )
-        article1_routing_method = st.selectbox(
-            "Routing method", ["geodesic_proxy", "osrm"], index=0,
-            help="geodesic_proxy is for development/sensitivity only. Use OSRM for the planned road-network primary analysis.",
-            key="cfg_health_article1_routing_method"
-        )
-        article1_travel_threshold = st.number_input(
-            "Geographic-constraint threshold (minutes)", min_value=5.0, max_value=240.0,
-            value=60.0, step=5.0, key="cfg_health_article1_travel_threshold"
-        )
-        article1_group_coupling = st.slider(
-            "Simulated group–geography coupling", 0.0, 1.0, 0.0, 0.05,
-            help="0 = independent geography. Values >0 intentionally simulate structural concentration of disadvantaged patients in poorer-access origins.",
-            key="cfg_health_article1_group_coupling"
-        )
-        article1_speed = st.number_input(
-            "Proxy speed (km/h; ignored by OSRM)", min_value=5.0, max_value=100.0,
-            value=40.0, step=5.0, key="cfg_health_article1_speed"
-        )
-        article1_threshold_sensitivity_enabled = st.toggle(
-            "Run travel-threshold sensitivity suite", value=True,
-            key="cfg_health_article1_threshold_sensitivity_enabled",
-            help="Reuses the same routed patient pathways and recomputes geographic constraint and joint burden at prespecified thresholds; it does not retrain or reroute."
-        )
-        article1_sensitivity_thresholds = st.multiselect(
-            "Sensitivity thresholds (minutes)",
-            options=[15, 30, 45, 60, 75, 90, 120],
-            default=[30, 45, 60, 90],
-            key="cfg_health_article1_sensitivity_thresholds"
-        )
-        article1_coupling_sensitivity_enabled = st.toggle(
-            "Run group–geography coupling suite", value=True,
-            key="cfg_health_article1_coupling_sensitivity_enabled",
-            help="Holds the trained model and predictions fixed while rerunning only the simulated patient-location assignment across prespecified coupling values."
-        )
-        article1_coupling_values = st.multiselect(
-            "Coupling values (λ)",
-            options=[0.0, 0.25, 0.50, 0.75, 1.0],
-            default=[0.0, 0.25, 0.50, 0.75, 1.0],
-            key="cfg_health_article1_coupling_values"
-        )
-        st.markdown("**S0–S3 intervention counterfactuals**")
-        article1_intervention_enabled = st.toggle(
-            "Run S0–S3 intervention suite", value=True,
-            key="cfg_health_article1_intervention_enabled",
-            help="Compares baseline, algorithm-only, geography-only, and combined counterfactual interventions on the same patient pathways."
-        )
-        article1_ai_gap_closure = st.slider(
-            "S1 AI intervention: fraction of subgroup FNR gap closed",
-            min_value=0.0, max_value=1.0, value=1.0, step=0.10,
-            key="cfg_health_article1_ai_gap_closure",
-            help="Counterfactually repairs the highest-probability missed positives in the higher-FNR subgroup. This is not a deployed mitigation algorithm."
-        )
-        article1_geo_time_reduction = st.slider(
-            "S2 geography intervention: referral travel-time reduction",
-            min_value=0.0, max_value=0.75, value=0.25, step=0.05, format="%.0f%%",
-            key="cfg_health_article1_geo_time_reduction",
-            help="Applies a proportional system-level reduction to the same referral travel-time estimates. It is a scenario parameter, not an observed policy effect."
-        )
-        st.markdown("**Publication-grade repeated-seed runner**")
-        article1_publication_mode = st.toggle(
-            "Enable publication runner", value=False,
-            key="cfg_health_article1_publication_mode",
-            help="Uses repeated seeds, run-level bootstrap intervals, and performance-matched model comparisons. This can be computationally expensive."
-        )
-        article1_publication_runs = st.number_input(
-            "Repeated seeds", min_value=5, max_value=100, value=30, step=5,
-            key="cfg_health_article1_publication_runs"
-        )
-        article1_bootstrap_reps = st.number_input(
-            "Run-level bootstrap replicates", min_value=100, max_value=10000, value=1000, step=100,
-            key="cfg_health_article1_bootstrap_reps"
-        )
-        article1_model_variants = st.multiselect(
-            "Model variants for performance matching",
-            options=["none", "reweighing", "post_processing"],
-            default=["none", "reweighing", "post_processing"],
-            key="cfg_health_article1_model_variants",
-            help="All variants use the same seed sequence and Article 1 geography assumptions."
-        )
-        article1_performance_tolerance = st.slider(
-            "Performance-match tolerance (absolute)", min_value=0.005, max_value=0.10,
-            value=0.03, step=0.005, format="%.3f",
-            key="cfg_health_article1_performance_tolerance",
-            help="A variant is performance-matched only if mean accuracy, AUROC and balanced accuracy are each within this tolerance of baseline."
-        )
-        st.caption("Article 1 uses a prespecified screen-to-referral policy: benchmark-positive patients are eligible for higher-level diagnostic assessment. This is not an emergency-triage rule or individualized clinical recommendation.")
-
-    article1_facilities_df = pd.DataFrame()
-    if article1_facility_upload is not None:
-        try:
-            if str(article1_facility_upload.name).lower().endswith((".xlsx", ".xls")):
-                article1_facilities_df = pd.read_excel(article1_facility_upload)
-            else:
-                article1_facilities_df = pd.read_csv(article1_facility_upload)
-        except Exception as exc:
-            st.error(f"Article 1 facility dataset could not be loaded: {exc}")
-
-    article1_config = Article1ReferralConfig(
-        enabled=bool(article1_enabled),
-        travel_threshold_min=float(article1_travel_threshold),
-        routing_method=str(article1_routing_method),
-        assumed_speed_kmh=float(article1_speed),
-        group_location_coupling=float(article1_group_coupling),
-    )
-
-    st.divider()
     st.subheader("🧩 Analytical Modules")
 
     with st.expander("🛡️ Safety, Audit & Governance Toggles", expanded=False):
@@ -1937,9 +1130,8 @@ st.markdown(
 
 # ── Main Simulation Execution Loop ─────────────────────────────────────────────
 if run_button:
-    effective_n_runs = int(article1_publication_runs) if (article1_config.enabled and article1_publication_mode) else int(n_runs)
     experiment_config = ExperimentConfig(
-        data_source=data_source, n_samples=int(sample_size), n_runs=int(effective_n_runs),
+        data_source=data_source, n_samples=int(sample_size), n_runs=int(n_runs),
         selected_biases=tuple(selected_biases), bias_intensity=float(bias_intensity),
         poison_rate=float(poison_rate), access_inequality=float(access_inequality),
         low_income_ratio=float(low_income_ratio), uninsured_ratio=float(uninsured_ratio),
@@ -1949,52 +1141,13 @@ if run_button:
     )
     experiment_config.validate()
     st.session_state["health_experiment_config"] = asdict(experiment_config)
-    st.session_state["health_experiment_config"]["article1_referral"] = asdict(article1_config)
-    st.session_state["health_experiment_config"]["article1_threshold_sensitivity"] = {
-        "enabled": bool(article1_threshold_sensitivity_enabled),
-        "thresholds_min": [float(x) for x in article1_sensitivity_thresholds],
-        "method": "post-routing threshold reclassification",
-    }
-    st.session_state["health_experiment_config"]["article1_coupling_sensitivity"] = {
-        "enabled": bool(article1_coupling_sensitivity_enabled),
-        "coupling_values": [float(x) for x in article1_coupling_values],
-        "method": "fixed-model structural-location reassignment",
-    }
-    st.session_state["health_experiment_config"]["article1_interventions"] = {
-        "enabled": bool(article1_intervention_enabled),
-        "scenarios": ["S0 Baseline", "S1 AI improvement", "S2 Geography improvement", "S3 Combined improvement"],
-        "ai_gap_closure": float(article1_ai_gap_closure),
-        "geography_time_reduction": float(article1_geo_time_reduction),
-        "method": "fixed-patient counterfactual intervention decomposition",
-    }
-    st.session_state["health_experiment_config"]["article1_publication_runner"] = {
-        "enabled": bool(article1_publication_mode),
-        "repeated_seeds": int(effective_n_runs),
-        "bootstrap_reps": int(article1_bootstrap_reps),
-        "bootstrap_unit": "run/seed",
-        "model_variants": list(article1_model_variants),
-        "performance_match_tolerance": float(article1_performance_tolerance),
-        "matching_metrics": ["accuracy", "auc", "balanced_accuracy"],
-    }
-    article1_config.validate()
-    if article1_config.enabled and article1_facilities_df.empty:
-        raise ValueError("Article 1 is enabled. Upload the GRID3/facility dataset before running the simulation.")
-    st.session_state["health_article1_patient_records"] = []
-    st.session_state["health_article1_summary"] = {}
-    st.session_state["health_article1_threshold_sensitivity"] = []
-    st.session_state["health_article1_coupling_sensitivity"] = []
-    st.session_state["health_article1_interventions"] = []
-    st.session_state["health_article1_intervention_patients"] = []
-    st.session_state["health_article1_publication_master"] = []
-    st.session_state["health_article1_publication_ci"] = pd.DataFrame()
-    st.session_state["health_article1_performance_match"] = pd.DataFrame()
     st.session_state.health_run_history = []
     st.session_state["health_feature_outputs"] = {}
     prog = st.progress(0, text="Executing Healthcare Simulation...")
 
-    for i in range(effective_n_runs):
-        prog.progress((i) / effective_n_runs, text=f"Run {i + 1} of {effective_n_runs}…")
-        with st.spinner(f"Simulating Iteration {i + 1}/{effective_n_runs}"):
+    for i in range(n_runs):
+        prog.progress((i) / n_runs, text=f"Run {i + 1} of {n_runs}…")
+        with st.spinner(f"Simulating Iteration {i + 1}/{n_runs}"):
             result = _run_one(
                 data_source=data_source,
                 n_samples=sample_size,
@@ -2015,73 +1168,8 @@ if run_button:
                 mitigation_strategy=mitigation_strategy,
                 threshold=active_threshold,
                 experiment_seed=42,
-                article1_config=article1_config,
-                article1_facilities=article1_facilities_df,
             )
             st.session_state.health_run_history.append(result)
-            if article1_publication_mode and article1_config.enabled:
-                _primary_variant = str(mitigation_strategy)
-                st.session_state["health_article1_publication_master"].extend(
-                    _article1_tidy_from_result(result, _primary_variant)
-                )
-                # Fit additional mitigation variants with the same seed sequence.
-                for _variant in [v for v in article1_model_variants if str(v) != _primary_variant]:
-                    _variant_result = _run_one(
-                        data_source=data_source, n_samples=sample_size,
-                        selected_biases=selected_biases, bias_intensity=bias_intensity,
-                        poison_rate=poison_rate, access_inequality=access_inequality,
-                        run_idx=i, enable_redteam=False, enable_governance=False,
-                        enable_arena=False, enable_agent_economy=False, enable_gender_audit=False,
-                        selected_state=selected_state, low_income_ratio=low_income_ratio,
-                        uninsured_ratio=uninsured_ratio, mitigation_strategy=str(_variant),
-                        threshold=active_threshold, experiment_seed=42,
-                        article1_config=article1_config, article1_facilities=article1_facilities_df,
-                    )
-                    st.session_state["health_article1_publication_master"].extend(
-                        _article1_tidy_from_result(_variant_result, str(_variant))
-                    )
-            if result.get("article1_patient_records") is not None:
-                _a1 = result["article1_patient_records"].copy()
-                _a1["run_id"] = int(result.get("run_id", i + 1))
-                _a1["seed"] = int(result.get("seed", 42 + i))
-                st.session_state["health_article1_patient_records"].append(_a1)
-                st.session_state["health_article1_summary"] = result.get("article1_summary", {})
-                if article1_threshold_sensitivity_enabled:
-                    for _thr in sorted(set(float(x) for x in article1_sensitivity_thresholds)):
-                        _sens_rows = _summarize_article1_records_at_threshold(_a1, _thr)
-                        for _sr in _sens_rows:
-                            _sr["run_id"] = int(result.get("run_id", i + 1))
-                            _sr["seed"] = int(result.get("seed", 42 + i))
-                            _sr["routing_method"] = result.get("article1_summary", {}).get("routing_method_observed")
-                        st.session_state["health_article1_threshold_sensitivity"].extend(_sens_rows)
-                if article1_coupling_sensitivity_enabled and result.get("model_artifact") is not None:
-                    for _lam in sorted(set(float(x) for x in article1_coupling_values)):
-                        _coupling_cfg = replace(article1_config, group_location_coupling=float(_lam))
-                        _c_summary, _c_records = _run_article1_joint_burden(
-                            result["model_artifact"], article1_facilities_df,
-                            _coupling_cfg, int(result.get("seed", 42 + i))
-                        )
-                        _c_rows = _summarize_article1_coupling_scenario(_c_summary, _c_records, _lam)
-                        for _cr in _c_rows:
-                            _cr["run_id"] = int(result.get("run_id", i + 1))
-                            _cr["seed"] = int(result.get("seed", 42 + i))
-                            _cr["accuracy"] = float(result.get("accuracy", np.nan))
-                            _cr["auc"] = float(result.get("auc", np.nan)) if result.get("auc") is not None else np.nan
-                        st.session_state["health_article1_coupling_sensitivity"].extend(_c_rows)
-                if article1_intervention_enabled:
-                    _i_rows, _i_patients = _run_article1_s0_s3_interventions(
-                        _a1,
-                        travel_threshold_min=float(article1_config.travel_threshold_min),
-                        ai_gap_closure=float(article1_ai_gap_closure),
-                        geography_time_reduction=float(article1_geo_time_reduction),
-                    )
-                    for _ir in _i_rows:
-                        _ir["run_id"] = int(result.get("run_id", i + 1))
-                        _ir["seed"] = int(result.get("seed", 42 + i))
-                    _i_patients["run_id"] = int(result.get("run_id", i + 1))
-                    _i_patients["seed"] = int(result.get("seed", 42 + i))
-                    st.session_state["health_article1_interventions"].extend(_i_rows)
-                    st.session_state["health_article1_intervention_patients"].append(_i_patients)
             result["experiment_id"] = hashlib.sha256(json.dumps({"data_source": data_source, "seed": result.get("seed"), "biases": selected_biases, "mitigation": mitigation_strategy, "threshold": active_threshold}, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
             save_to_history(
@@ -2100,18 +1188,6 @@ if run_button:
                     "selected_biases": selected_biases,
                 },
             )
-
-    if article1_publication_mode and article1_config.enabled and st.session_state.get("health_article1_publication_master"):
-        _pub_master = pd.DataFrame(st.session_state["health_article1_publication_master"])
-        st.session_state["health_article1_publication_ci"] = _article1_run_level_bootstrap_ci(
-            _pub_master, n_boot=int(article1_bootstrap_reps), seed=20260912
-        )
-        _perf_source = _pub_master.drop_duplicates(subset=["seed", "model_variant"])[
-            ["seed", "model_variant", "accuracy", "auc", "balanced_accuracy", "sensitivity", "specificity"]
-        ]
-        st.session_state["health_article1_performance_match"] = _article1_performance_match_table(
-            _perf_source, tolerance=float(article1_performance_tolerance)
-        )
 
     if any([_real_model_cfg["enable_datasets"], _real_model_cfg["enable_huggingface"], _real_model_cfg["enable_apis"]]):
         with st.spinner("Running real model comparison..."):
@@ -2191,7 +1267,7 @@ if run_button:
     if enable_lifecycle or enable_eco:
         st.session_state["health_lifecycle_report"] = run_lifecycle_suite(
             domain="health", algo_key="rf", algo_label="Random Forest",
-            n_samples=sample_size, n_runs=effective_n_runs, n_features=int(_last_run.get("n_features", 0)),
+            n_samples=sample_size, n_runs=n_runs, n_features=int(_last_run.get("n_features", 0)),
             metrics=_last_run, enable_registry=enable_lifecycle, enable_eco=enable_eco
         )
 
@@ -2256,7 +1332,7 @@ if st.session_state.health_run_history:
     # ── Tab Navigation Setup ───────────────────────────────────────────────────
     _tab_labels = [
         "Performance", "Equity", "Clinical Impact","Dynamic Systems", "Feature Modules", "Explainable AI", "Compliance", "Longitudinal",
-"Data Analysis","🔬 Article 1 — Referral Equity","Raw Results", "Case Study", "🔬 Real Models",
+"Data Analysis","Raw Results", "Case Study", "🔬 Real Models",
     ]
 
     _tabs_obj = st.tabs(_tab_labels)
@@ -3184,369 +2260,18 @@ if st.session_state.health_run_history:
       #  if st.session_state.get("health_federated"):
        #     st.json(st.session_state["health_federated"])
 
-    # ── Article 1 Referral Equity Research Dashboard ─────────────────────────────
-    with T["🔬 Article 1 — Referral Equity"]:
-        st.markdown("### 🔬 Article 1 — Referral Equity")
-        st.caption("Patient-level coupling of AI missed referral opportunities with geographic referral constraints. Research simulation only; not an emergency-triage or individualized clinical recommendation.")
-
-        _a1_frames = st.session_state.get("health_article1_patient_records", [])
-        _a1_summary = st.session_state.get("health_article1_summary", {})
-        if not _a1_frames or not _a1_summary:
-            st.info("Enable the Article 1 referral-access experiment in the sidebar, upload the GRID3 facility workbook, and run the simulation to populate this dashboard.")
-        else:
-            _a1_all = pd.concat(_a1_frames, ignore_index=True)
-            _eligible = _a1_all[_a1_all["referral_eligible_r"] == 1].copy()
-
-            # Aggregate directly from all patient-level records across repeated runs.
-            _rows = []
-            for _g, _d in _eligible.groupby("group", dropna=False):
-                _fnr = float(_d["missed_referral_opportunity_m"].mean()) if len(_d) else np.nan
-                _cr = float(_d["geographic_constraint_c"].mean()) if len(_d) else np.nan
-                _jb = float(_d["joint_burden_j"].mean()) if len(_d) else np.nan
-                _ind = _fnr * _cr
-                _c1 = _d[_d["geographic_constraint_c"] == 1]
-                _c0 = _d[_d["geographic_constraint_c"] == 0]
-                _dep = (float(_c1["missed_referral_opportunity_m"].mean()) - float(_c0["missed_referral_opportunity_m"].mean())) if (len(_c1) and len(_c0)) else np.nan
-                _label = "Disadvantaged" if str(_g) in {"0", "0.0"} else ("Advantaged" if str(_g) in {"1", "1.0"} else str(_g))
-                _rows.append({"Group": _label, "Raw group": _g, "N referral-eligible": int(len(_d)), "FNR / missed referral": _fnr, "Geographic constraint": _cr, "Joint burden J": _jb, "Independence J_ind": _ind, "Excess E": _jb-_ind, "Dependence D": _dep})
-            _metric_df = pd.DataFrame(_rows)
-
-            _dis = _metric_df[_metric_df["Group"] == "Disadvantaged"]
-            _adv = _metric_df[_metric_df["Group"] == "Advantaged"]
-            def _gap(col):
-                if len(_dis) and len(_adv):
-                    return float(_dis.iloc[0][col] - _adv.iloc[0][col])
-                return np.nan
-
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Referral-eligible records", f"{len(_eligible):,}")
-            k2.metric("ΔFNR (Disadv. − Adv.)", "N/A" if np.isnan(_gap("FNR / missed referral")) else f"{_gap('FNR / missed referral'):+.1%}")
-            k3.metric("Δ Geographic Constraint", "N/A" if np.isnan(_gap("Geographic constraint")) else f"{_gap('Geographic constraint'):+.1%}")
-            k4.metric("Δ Joint Burden", "N/A" if np.isnan(_gap("Joint burden J")) else f"{_gap('Joint burden J'):+.1%}")
-
-            st.markdown("#### Primary Article 1 estimands")
-            _display_metrics = _metric_df.copy()
-            for _c in ["FNR / missed referral", "Geographic constraint", "Joint burden J", "Independence J_ind", "Excess E", "Dependence D"]:
-                _display_metrics[_c] = _display_metrics[_c].map(lambda x: "N/A" if pd.isna(x) else f"{x:.3f}")
-            st.dataframe(_display_metrics.drop(columns=["Raw group"], errors="ignore"), use_container_width=True, hide_index=True)
-
-            c1, c2 = st.columns(2)
-            with c1:
-                _plot = _metric_df.melt(id_vars=["Group"], value_vars=["FNR / missed referral", "Geographic constraint", "Joint burden J"], var_name="Measure", value_name="Rate")
-                fig = px.bar(_plot, x="Group", y="Rate", barmode="group", facet_col="Measure", title="Algorithmic Miss, Geographic Constraint, and Joint Burden")
-                fig.update_yaxes(tickformat=".0%", range=[0, max(1.0, float(_plot["Rate"].max()) * 1.15 if len(_plot) else 1.0)])
-                fig.update_layout(showlegend=False, height=430)
-                st.plotly_chart(fig, use_container_width=True)
-            with c2:
-                _decomp = _metric_df.melt(id_vars=["Group"], value_vars=["Joint burden J", "Independence J_ind", "Excess E"], var_name="Component", value_name="Value")
-                fig2 = px.bar(_decomp, x="Group", y="Value", color="Component", barmode="group", title="Joint-Burden Decomposition")
-                fig2.update_yaxes(tickformat=".0%")
-                fig2.update_layout(height=430)
-                st.plotly_chart(fig2, use_container_width=True)
-
-            st.markdown("#### Travel-threshold sensitivity")
-            _sens_records = st.session_state.get("health_article1_threshold_sensitivity", [])
-            if _sens_records:
-                _sens = pd.DataFrame(_sens_records)
-                _sens["Group label"] = _sens["group"].map(lambda g: "All referral-eligible" if str(g) == "ALL" else ("Disadvantaged" if str(g) in {"0", "0.0"} else ("Advantaged" if str(g) in {"1", "1.0"} else str(g))))
-                _sens_agg = _sens.groupby(["threshold_min", "Group label"], as_index=False).agg(
-                    runs=("run_id", "nunique"),
-                    n_referral_eligible=("n_referral_eligible", "sum"),
-                    fnr_missed_referral=("fnr_missed_referral", "mean"),
-                    geographic_constraint=("geographic_constraint", "mean"),
-                    joint_burden_j=("joint_burden_j", "mean"),
-                    independence_j_ind=("independence_j_ind", "mean"),
-                    excess_e=("excess_e", "mean"),
-                    dependence_d=("dependence_d", "mean"),
-                )
-                _sens_groups = _sens_agg[_sens_agg["Group label"] != "All referral-eligible"].copy()
-                if len(_sens_groups):
-                    fig_s1 = px.line(
-                        _sens_groups, x="threshold_min", y="joint_burden_j", color="Group label", markers=True,
-                        title="Joint Burden Across Geographic-Constraint Thresholds",
-                        labels={"threshold_min":"Travel-time threshold (minutes)", "joint_burden_j":"Joint burden J"}
-                    )
-                    fig_s1.update_yaxes(tickformat=".1%")
-                    st.plotly_chart(fig_s1, use_container_width=True)
-
-                _overall_sens = _sens_agg[_sens_agg["Group label"] == "All referral-eligible"].copy()
-                if len(_overall_sens):
-                    _long = _overall_sens.melt(
-                        id_vars=["threshold_min"],
-                        value_vars=["geographic_constraint", "joint_burden_j", "independence_j_ind", "excess_e"],
-                        var_name="Measure", value_name="Rate"
-                    )
-                    fig_s2 = px.line(
-                        _long, x="threshold_min", y="Rate", color="Measure", markers=True,
-                        title="Overall Threshold Sensitivity: Constraint, Joint Burden, and Decomposition",
-                        labels={"threshold_min":"Travel-time threshold (minutes)"}
-                    )
-                    fig_s2.update_yaxes(tickformat=".1%")
-                    st.plotly_chart(fig_s2, use_container_width=True)
-
-                _sens_display = _sens_agg.copy()
-                for _c in ["fnr_missed_referral", "geographic_constraint", "joint_burden_j", "independence_j_ind", "excess_e", "dependence_d"]:
-                    _sens_display[_c] = _sens_display[_c].map(lambda x: "N/A" if pd.isna(x) else f"{x:.3f}")
-                st.dataframe(_sens_display, use_container_width=True, hide_index=True)
-                st.download_button(
-                    "⬇️ Article 1 Threshold-Sensitivity Results (CSV)",
-                    _sens.to_csv(index=False),
-                    file_name="article1_threshold_sensitivity.csv", mime="text/csv", key="a1_sensitivity_csv"
-                )
-                st.caption("Sensitivity rows reuse the same routed pathways and change only the travel-time threshold defining C. This isolates threshold-definition sensitivity from model retraining and routing variation.")
-            else:
-                st.info("Enable the travel-threshold sensitivity suite in the Article 1 sidebar controls to populate this section.")
-
-            st.markdown("#### Group–geography coupling sensitivity")
-            _coupling_records = st.session_state.get("health_article1_coupling_sensitivity", [])
-            if _coupling_records:
-                _coup = pd.DataFrame(_coupling_records)
-                _coup["Group label"] = _coup["group"].map(lambda g: "All referral-eligible" if str(g) == "ALL" else ("Disadvantaged" if str(g) in {"0", "0.0"} else ("Advantaged" if str(g) in {"1", "1.0"} else str(g))))
-                _coup_agg = _coup.groupby(["coupling_lambda", "Group label"], as_index=False).agg(
-                    runs=("run_id", "nunique"),
-                    n_referral_eligible=("n_referral_eligible", "sum"),
-                    fnr_missed_referral=("fnr_missed_referral", "mean"),
-                    geographic_constraint=("geographic_constraint", "mean"),
-                    joint_burden_j=("joint_burden_j", "mean"),
-                    independence_j_ind=("independence_j_ind", "mean"),
-                    excess_e=("excess_e", "mean"),
-                    dependence_d=("dependence_d", "mean"),
-                )
-                _coup_groups = _coup_agg[_coup_agg["Group label"] != "All referral-eligible"].copy()
-                if len(_coup_groups):
-                    fig_c1 = px.line(
-                        _coup_groups, x="coupling_lambda", y="joint_burden_j", color="Group label", markers=True,
-                        title="Joint Burden as Structural Group–Geography Coupling Increases",
-                        labels={"coupling_lambda":"Coupling λ", "joint_burden_j":"Joint burden J"}
-                    )
-                    fig_c1.update_yaxes(tickformat=".1%")
-                    st.plotly_chart(fig_c1, use_container_width=True)
-                    fig_c2 = px.line(
-                        _coup_groups, x="coupling_lambda", y="geographic_constraint", color="Group label", markers=True,
-                        title="Geographic Constraint by Group Across Coupling Scenarios",
-                        labels={"coupling_lambda":"Coupling λ", "geographic_constraint":"Geographic constraint C"}
-                    )
-                    fig_c2.update_yaxes(tickformat=".1%")
-                    st.plotly_chart(fig_c2, use_container_width=True)
-
-                _pivot_j = _coup_groups.pivot(index="coupling_lambda", columns="Group label", values="joint_burden_j") if len(_coup_groups) else pd.DataFrame()
-                if {"Disadvantaged", "Advantaged"}.issubset(set(_pivot_j.columns)):
-                    _gap = (_pivot_j["Disadvantaged"] - _pivot_j["Advantaged"]).reset_index(name="delta_joint_disadv_minus_adv")
-                    fig_c3 = px.line(_gap, x="coupling_lambda", y="delta_joint_disadv_minus_adv", markers=True,
-                                     title="Joint-Burden Disparity Across Coupling Scenarios",
-                                     labels={"coupling_lambda":"Coupling λ", "delta_joint_disadv_minus_adv":"ΔJ (disadvantaged − advantaged)"})
-                    fig_c3.update_yaxes(tickformat=".1%")
-                    st.plotly_chart(fig_c3, use_container_width=True)
-
-                _coup_display = _coup_agg.copy()
-                for _c in ["fnr_missed_referral", "geographic_constraint", "joint_burden_j", "independence_j_ind", "excess_e", "dependence_d"]:
-                    _coup_display[_c] = _coup_display[_c].map(lambda x: "N/A" if pd.isna(x) else f"{x:.3f}")
-                st.dataframe(_coup_display, use_container_width=True, hide_index=True)
-                st.download_button(
-                    "⬇️ Article 1 Coupling-Sensitivity Results (CSV)",
-                    _coup.to_csv(index=False),
-                    file_name="article1_coupling_sensitivity.csv", mime="text/csv", key="a1_coupling_sensitivity_csv"
-                )
-                st.caption("This suite holds the fitted model, predictions, referral threshold, and facility network fixed. λ changes only the simulated concentration of patient groups in better- versus worse-access origin pools; it is a controlled structural scenario, not an observed Nigerian inequality estimate.")
-            else:
-                st.info("Enable the group–geography coupling suite in the Article 1 sidebar controls to populate this section.")
-
-            st.markdown("#### S0–S3 intervention counterfactuals")
-            _int_rows = st.session_state.get("health_article1_interventions", [])
-            if _int_rows:
-                _int_df = pd.DataFrame(_int_rows)
-                _int_df = _int_df[_int_df["scenario"] != "INTERVENTION_METADATA"].copy()
-                _int_df["Group label"] = _int_df["group"].map({"0":"Disadvantaged", "0.0":"Disadvantaged", "1":"Advantaged", "1.0":"Advantaged", "ALL":"All referral-eligible"}).fillna(_int_df["group"].astype(str))
-                _int_agg = _int_df.groupby(["scenario","Group label"], as_index=False).agg(
-                    fnr_missed_referral=("fnr_missed_referral","mean"),
-                    geographic_constraint=("geographic_constraint","mean"),
-                    joint_burden_j=("joint_burden_j","mean"),
-                    independence_j_ind=("independence_j_ind","mean"),
-                    excess_e=("excess_e","mean"),
-                    dependence_d=("dependence_d","mean"),
-                )
-                _scenario_order = ["S0 Baseline", "S1 AI improvement", "S2 Geography improvement", "S3 Combined improvement"]
-                _int_agg["scenario"] = pd.Categorical(_int_agg["scenario"], categories=_scenario_order, ordered=True)
-                _int_agg = _int_agg.sort_values(["scenario","Group label"])
-                _all_int = _int_agg[_int_agg["Group label"] == "All referral-eligible"].copy()
-                if len(_all_int):
-                    fig_i1 = px.bar(
-                        _all_int, x="scenario", y="joint_burden_j",
-                        title="S0–S3: Overall Joint Burden",
-                        labels={"scenario":"Scenario", "joint_burden_j":"Joint burden J"}
-                    )
-                    fig_i1.update_yaxes(tickformat=".1%")
-                    st.plotly_chart(fig_i1, use_container_width=True)
-
-                _group_int = _int_agg[_int_agg["Group label"] != "All referral-eligible"].copy()
-                if len(_group_int):
-                    fig_i2 = px.bar(
-                        _group_int, x="scenario", y="joint_burden_j", color="Group label", barmode="group",
-                        title="S0–S3: Joint Burden by Group",
-                        labels={"scenario":"Scenario", "joint_burden_j":"Joint burden J"}
-                    )
-                    fig_i2.update_yaxes(tickformat=".1%")
-                    st.plotly_chart(fig_i2, use_container_width=True)
-
-                    _piv = _group_int.pivot(index="scenario", columns="Group label", values="joint_burden_j")
-                    if {"Disadvantaged", "Advantaged"}.issubset(set(_piv.columns)):
-                        _dgap = (_piv["Disadvantaged"] - _piv["Advantaged"]).reset_index(name="delta_joint")
-                        fig_i3 = px.bar(
-                            _dgap, x="scenario", y="delta_joint",
-                            title="S0–S3: Joint-Burden Disparity",
-                            labels={"scenario":"Scenario", "delta_joint":"ΔJ (disadvantaged − advantaged)"}
-                        )
-                        fig_i3.update_yaxes(tickformat=".1%")
-                        st.plotly_chart(fig_i3, use_container_width=True)
-
-                _int_show = _int_agg.copy()
-                for _c in ["fnr_missed_referral","geographic_constraint","joint_burden_j","independence_j_ind","excess_e","dependence_d"]:
-                    _int_show[_c] = _int_show[_c].map(lambda x: "N/A" if pd.isna(x) else f"{x:.3f}")
-                st.dataframe(_int_show, use_container_width=True, hide_index=True)
-                st.download_button(
-                    "⬇️ Article 1 S0–S3 Intervention Results (CSV)",
-                    pd.DataFrame(_int_rows).to_csv(index=False),
-                    file_name="article1_s0_s3_interventions.csv", mime="text/csv", key="a1_intervention_csv"
-                )
-                _int_pat = st.session_state.get("health_article1_intervention_patients", [])
-                if _int_pat:
-                    st.download_button(
-                        "⬇️ Article 1 S0–S3 Patient Counterfactuals (CSV)",
-                        pd.concat(_int_pat, ignore_index=True).to_csv(index=False),
-                        file_name="article1_s0_s3_patient_counterfactuals.csv", mime="text/csv", key="a1_intervention_patients_csv"
-                    )
-                st.caption("S1 is a counterfactual FNR-gap repair, S2 is a proportional travel-time improvement, and S3 combines both. These scenarios estimate simulated technical leverage, not causal effects of a real Nigerian intervention.")
-            else:
-                st.info("Enable the S0–S3 intervention suite in the Article 1 sidebar controls to populate this section.")
-
-            st.markdown("#### Referral pathway")
-            _n_r = int(len(_eligible)); _n_m = int(_eligible["missed_referral_opportunity_m"].sum()); _n_detect = _n_r - _n_m
-            _miss = _eligible[_eligible["missed_referral_opportunity_m"] == 1]
-            _det = _eligible[_eligible["missed_referral_opportunity_m"] == 0]
-            _m_c = int(_miss["geographic_constraint_c"].sum()); _m_a = len(_miss)-_m_c
-            _d_c = int(_det["geographic_constraint_c"].sum()); _d_a = len(_det)-_d_c
-            _sankey = go.Figure(go.Sankey(node=dict(label=["Referral eligible", "Detected", "Missed referral opportunity", "Detected + accessible", "Detected + constrained", "Missed + accessible", "Joint burden (missed + constrained)"]), link=dict(source=[0,0,1,1,2,2], target=[1,2,3,4,5,6], value=[_n_detect,_n_m,_d_a,_d_c,_m_a,_m_c])))
-            _sankey.update_layout(height=420, title="Screen-to-Referral Pathway")
-            st.plotly_chart(_sankey, use_container_width=True)
-
-            st.markdown("#### Referral geography")
-            _map_df = _a1_all.drop_duplicates(subset=["origin_facility_id", "referral_facility_id"])[["origin_lat","origin_lon","origin_facility_name","origin_state","referral_lat","referral_lon","referral_facility_name","referral_facility_type","straight_line_km"]].copy()
-            _orig = _map_df[["origin_lat","origin_lon","origin_facility_name","origin_state"]].rename(columns={"origin_lat":"lat","origin_lon":"lon","origin_facility_name":"facility","origin_state":"state"}).drop_duplicates()
-            _orig["role"] = "Patient-origin proxy (Primary)"
-            _dest = _map_df[["referral_lat","referral_lon","referral_facility_name","referral_facility_type"]].rename(columns={"referral_lat":"lat","referral_lon":"lon","referral_facility_name":"facility","referral_facility_type":"state"}).drop_duplicates()
-            _dest["role"] = "Eligible higher-level referral"
-            _map_points = pd.concat([_orig, _dest], ignore_index=True)
-            if len(_map_points):
-                fig3 = px.scatter_map(_map_points, lat="lat", lon="lon", hover_name="facility", hover_data=["role", "state"], color="role", zoom=4.2, height=520, title="Simulated Patient-Origin Proxies and Matched Referral Facilities")
-                st.plotly_chart(fig3, use_container_width=True)
-            st.caption("Map origins are simulated patient-location proxies anchored to functional primary facilities. Referral destinations are eligible functional secondary/tertiary facilities; this does not establish disease-specific service capability.")
-
-            st.markdown("#### Patient-level audit records")
-            _show_cols = ["run_id","seed","patient_index","group","referral_eligible_r","predicted_positive","prediction_probability","missed_referral_opportunity_m","origin_facility_name","origin_state","referral_facility_name","referral_facility_type","straight_line_km","travel_time_min","geographic_constraint_c","joint_burden_j","routing_method"]
-            st.dataframe(_a1_all[[c for c in _show_cols if c in _a1_all.columns]], use_container_width=True, hide_index=True, height=420)
-
-            st.markdown("#### Publication-grade repeated-seed analysis")
-            _pub_master = pd.DataFrame(st.session_state.get("health_article1_publication_master", []))
-            _pub_ci = st.session_state.get("health_article1_publication_ci", pd.DataFrame())
-            _pub_match = st.session_state.get("health_article1_performance_match", pd.DataFrame())
-            if not _pub_master.empty:
-                _nseeds = int(_pub_master["seed"].nunique())
-                _nmodels = int(_pub_master["model_variant"].nunique())
-                pc1, pc2, pc3 = st.columns(3)
-                pc1.metric("Repeated seeds", _nseeds)
-                pc2.metric("Model variants", _nmodels)
-                pc3.metric("Bootstrap replicates", int(st.session_state.get("health_experiment_config", {}).get("article1_publication_runner", {}).get("bootstrap_reps", 0)))
-                st.caption("95% intervals resample whole seed-level runs, preserving within-run patient dependence. They quantify simulation/retraining uncertainty, not population-representative uncertainty for Nigeria.")
-                if isinstance(_pub_match, pd.DataFrame) and not _pub_match.empty:
-                    st.markdown("**Performance-matched model comparison**")
-                    st.dataframe(_pub_match, use_container_width=True, hide_index=True)
-                if isinstance(_pub_ci, pd.DataFrame) and not _pub_ci.empty:
-                    st.markdown("**Run-level bootstrap estimates**")
-                    st.dataframe(_pub_ci, use_container_width=True, hide_index=True)
-                    _jci = _pub_ci[(_pub_ci["metric"] == "joint_burden_j")].copy()
-                    if not _jci.empty:
-                        fig_pub = px.bar(_jci, x="model_variant", y="estimate", color="group", barmode="group", title="Repeated-seed mean joint burden by model variant")
-                        st.plotly_chart(fig_pub, use_container_width=True)
-                st.download_button("⬇️ Publication Master Results (CSV)", _pub_master.to_csv(index=False), file_name="article1_publication_master_results.csv", mime="text/csv", key="a1_pub_master_csv")
-                if isinstance(_pub_ci, pd.DataFrame) and not _pub_ci.empty:
-                    st.download_button("⬇️ Run-Level Bootstrap CIs (CSV)", _pub_ci.to_csv(index=False), file_name="article1_publication_bootstrap_ci.csv", mime="text/csv", key="a1_pub_ci_csv")
-                if isinstance(_pub_match, pd.DataFrame) and not _pub_match.empty:
-                    st.download_button("⬇️ Performance-Match Table (CSV)", _pub_match.to_csv(index=False), file_name="article1_performance_match.csv", mime="text/csv", key="a1_pub_match_csv")
-            else:
-                st.info("Enable the publication runner in the Article 1 sidebar controls and run the simulation to generate repeated-seed inference and performance-matched comparisons.")
-
-            st.markdown("#### Experiment provenance & assumptions")
-            _prov = {
-                "Dataset": st.session_state.get("cfg_health_data_source"),
-                "Referral policy": _a1_summary.get("referral_policy"),
-                "Analysis population": _a1_summary.get("analysis_population"),
-                "Routing requested": _a1_summary.get("routing_method_requested"),
-                "Routing observed": _a1_summary.get("routing_method_observed"),
-                "Constraint threshold (min)": _a1_summary.get("travel_threshold_min"),
-                "Threshold sensitivity enabled": bool(st.session_state.get("health_experiment_config", {}).get("article1_threshold_sensitivity", {}).get("enabled", False)),
-                "Sensitivity thresholds (min)": st.session_state.get("health_experiment_config", {}).get("article1_threshold_sensitivity", {}).get("thresholds_min", []),
-                "Group–geography coupling": _a1_summary.get("group_location_coupling"),
-                "Coupling sensitivity enabled": bool(st.session_state.get("health_experiment_config", {}).get("article1_coupling_sensitivity", {}).get("enabled", False)),
-                "Coupling values (λ)": st.session_state.get("health_experiment_config", {}).get("article1_coupling_sensitivity", {}).get("coupling_values", []),
-                "S0–S3 interventions enabled": bool(st.session_state.get("health_experiment_config", {}).get("article1_interventions", {}).get("enabled", False)),
-                "AI FNR-gap closure": st.session_state.get("health_experiment_config", {}).get("article1_interventions", {}).get("ai_gap_closure"),
-                "Geography travel-time reduction": st.session_state.get("health_experiment_config", {}).get("article1_interventions", {}).get("geography_time_reduction"),
-                "Primary origin facilities": _a1_summary.get("n_primary_origin_facilities"),
-                "Eligible referral facilities": _a1_summary.get("n_eligible_referral_facilities"),
-                "Eligible levels": _a1_summary.get("eligible_referral_types"),
-                "Functional statuses": _a1_summary.get("functional_statuses"),
-                "Warning": _a1_summary.get("warning"),
-            }
-            st.json(_prov)
-            st.download_button("⬇️ Article 1 Patient-Level Referral Results (CSV)", _a1_all.to_csv(index=False), file_name="article1_patient_referral_results.csv", mime="text/csv", key="a1_tab_csv")
-            st.download_button("⬇️ Article 1 Joint-Burden Summary (JSON)", json.dumps(_a1_summary, indent=2, default=str), file_name="article1_joint_burden_summary.json", mime="application/json", key="a1_tab_json")
-
     # ── 10. Raw Results Tab ───────────────────────────────────────────────────
     with T["Raw Results"]:
         st.markdown("### Complete Simulation Raw Data")
         serializable_history = []
         for rr in st.session_state.health_run_history:
-            clean = {k: v for k, v in rr.items() if k not in {"model_artifact", "article1_patient_records"}}
+            clean = {k: v for k, v in rr.items() if k != "model_artifact"}
             serializable_history.append(clean)
         raw_json = json.dumps(serializable_history, indent=2, default=str)
         config_json = json.dumps(st.session_state.get("health_experiment_config", {}), indent=2, default=str)
         st.download_button("⬇️ Download Results (JSON)", raw_json, file_name="healthcare_equity_results.json", mime="application/json")
         st.download_button("⬇️ Download Experiment Configuration (JSON)", config_json, file_name="healthcare_equity_experiment_config.json", mime="application/json")
-        st.download_button("⬇️ Download Results (CSV)", pd.DataFrame(serializable_history).drop(columns=["provenance", "feature_names", "group_confusion", "impact_matrix", "subgroup_tpr", "article1_summary"], errors="ignore").to_csv(index=False), file_name="healthcare_equity_results.csv", mime="text/csv")
-        _a1_frames = st.session_state.get("health_article1_patient_records", [])
-        if _a1_frames:
-            _a1_export = pd.concat(_a1_frames, ignore_index=True)
-            st.download_button(
-                "⬇️ Article 1 Patient-Level Referral Results (CSV)",
-                _a1_export.to_csv(index=False),
-                file_name="article1_patient_referral_results.csv", mime="text/csv"
-            )
-            st.download_button(
-                "⬇️ Article 1 Joint-Burden Summary (JSON)",
-                json.dumps(st.session_state.get("health_article1_summary", {}), indent=2, default=str),
-                file_name="article1_joint_burden_summary.json", mime="application/json"
-            )
-        _a1_sens = st.session_state.get("health_article1_threshold_sensitivity", [])
-        if _a1_sens:
-            st.download_button(
-                "⬇️ Article 1 Threshold-Sensitivity Results (CSV)",
-                pd.DataFrame(_a1_sens).to_csv(index=False),
-                file_name="article1_threshold_sensitivity.csv", mime="text/csv", key="a1_raw_sensitivity_csv"
-            )
-        _a1_intervention_rows = st.session_state.get("health_article1_interventions", [])
-        if _a1_intervention_rows:
-            st.download_button(
-                "⬇️ Article 1 S0–S3 Interventions (CSV)",
-                pd.DataFrame(_a1_intervention_rows).to_csv(index=False),
-                file_name="article1_s0_s3_interventions.csv", mime="text/csv", key="raw_a1_intervention_csv"
-            )
-        _a1_coupling_rows = st.session_state.get("health_article1_coupling_sensitivity", [])
-        if _a1_coupling_rows:
-            st.download_button(
-                "⬇️ Article 1 Coupling-Sensitivity Results (CSV)",
-                pd.DataFrame(_a1_coupling_rows).to_csv(index=False),
-                file_name="article1_coupling_sensitivity.csv", mime="text/csv", key="raw_a1_coupling_csv"
-            )
+        st.download_button("⬇️ Download Results (CSV)", pd.DataFrame(serializable_history).drop(columns=["provenance", "feature_names", "group_confusion", "impact_matrix", "subgroup_tpr"], errors="ignore").to_csv(index=False), file_name="healthcare_equity_results.csv", mime="text/csv")
         st.json(serializable_history)
 
     # ── 11. AI Safety Tab ─────────────────────────────────────────────────────
