@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software release, please cite the archived Zenodo record and the associated manuscript."
+title: "GAGS-HE Paper 1 reproducibility release"
+type: software
+authors:
+  - family-names: "Baidoo"
+    given-names: "Thomas Enesi"
+affiliation: "Veritas University Abuja, Abuja, Nigeria"
+version: "1.0.0"
+date-released: "2026-09-14"
+repository-code: "https://github.com/hostey/GAG-MVP"
+abstract: "Frozen code and publication outputs for the Article 1 v11 geographic-replication experiment in the Healthcare Equity module of the Global AI Governance Sandbox."
+keywords:
+  - clinical AI fairness
+  - health equity
+  - geographic access
+  - sociotechnical systems
+  - reproducibility
