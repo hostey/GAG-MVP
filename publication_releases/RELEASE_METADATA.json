@@ -1,0 +1,22 @@
+{
+  "release": "v1.0.0",
+  "paper": "Whether model fairness is visible at pathway level depends on how often access is constrained",
+  "author": "Thomas Enesi Baidoo",
+  "affiliation": "Veritas University Abuja, Abuja, Nigeria",
+  "email": "baidoot@veritas.edu.ng",
+  "design_version": "Article 1 v11 geographic replication",
+  "model_seeds": 30,
+  "seed_base": 42,
+  "geo_replicates_per_referral_eligible_case": 100,
+  "thresholds_min": [
+    30,
+    45,
+    60,
+    90
+  ],
+  "assumed_speed_kmh": 40.0,
+  "origin_sampling": "Uniform with replacement over functional GRID3 primary facilities; facility-weighted, not population-weighted.",
+  "bootstrap": "Seed-level bootstrap; geographic replicas are not independent clinical observations.",
+  "uci_sha256": "a74b7efa387bc9d108d7d0115d831fe9b414b29ae7124f331b622b4efa0427c8",
+  "grid3_sha256": "c438adbeec7577515a945b5dffebe6b97af52a4a291c5f110b9088feb36d60a2"
+}
