@@ -1,4 +1,4 @@
-# GAGS-HE Paper 1 — Reproducibility Release v1.0.0
+# GAGS-Healthcare Equity Paper 1 — Reproducibility Release v1.0.0
 
 ## Associated manuscript
 
@@ -81,6 +81,8 @@ See `REPRODUCIBILITY.md` for validation checks and expected hashes.
 
 ## Versioning
 
-This release should be tagged **`paper1-v1.0.0`** on GitHub before archival in Zenodo.
+This reproducibility package is prepared as **`paper1-v1.0.0`** for the analyses reported in the associated manuscript.
 
-After Zenodo creates the DOI, add the DOI badge/link to the main GitHub README and insert the DOI in the manuscript Code Availability statement. Do not modify the archived files for this release after DOI publication; make a new version if a substantive correction is needed.
+We will add a permanent archival DOI here after deposition in Zenodo.
+
+Substantive changes to the analysis or reproducibility materials will be issued as a new version.
