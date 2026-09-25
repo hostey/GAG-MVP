@@ -35,11 +35,12 @@ from fpdf import FPDF
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     accuracy_score, recall_score, precision_score,
-    f1_score, confusion_matrix, roc_auc_score
+    f1_score, confusion_matrix, roc_auc_score, balanced_accuracy_score, brier_score_loss
 )
 from sklearn.model_selection import train_test_split
 from sklearn.datasets import load_breast_cancer
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 from datasets import load_dataset
 
 from components.translate import install_auto_translate, tx, tx_plotly, language_switcher
@@ -1180,6 +1181,582 @@ def _article1_performance_match_table(model_rows: pd.DataFrame, tolerance: float
     return pd.DataFrame(rows)
 
 
+
+# ── Article 2 / Article 3 Research Dashboards ──────────────────────────────────
+
+
+def _research_registry_init():
+    if "gags_he_experiment_registry" not in st.session_state:
+        st.session_state["gags_he_experiment_registry"] = []
+
+
+def _research_registry_add(article, experiment_type, config, results=None, provenance="interactive"):
+    """Register a reproducible research run without claiming publication equivalence."""
+    _research_registry_init()
+    payload = {
+        "article": str(article),
+        "experiment_type": str(experiment_type),
+        "config": config,
+        "provenance": provenance,
+        "software_version": "GAGS-HE v2.4",
+    }
+    raw = json.dumps(payload, sort_keys=True, default=str)
+    exp_id = "GAGS-HE-" + str(article).replace("Article ","A").replace(" ","") + "-" + hashlib.sha256(raw.encode()).hexdigest()[:12]
+    row = {
+        "experiment_id": exp_id,
+        "article": str(article),
+        "experiment_type": str(experiment_type),
+        "provenance": provenance,
+        "software_version": "GAGS-HE v2.4",
+        "configuration_json": json.dumps(config, sort_keys=True, default=str),
+        "results_json": json.dumps(results if results is not None else {}, sort_keys=True, default=str),
+    }
+    # Avoid duplicate registration caused by Streamlit reruns.
+    existing = {x.get("experiment_id") for x in st.session_state["gags_he_experiment_registry"]}
+    if exp_id not in existing:
+        st.session_state["gags_he_experiment_registry"].append(row)
+    return exp_id
+
+
+def render_experiment_registry():
+    _research_registry_init()
+    st.markdown("### 🧾 Experiment Registry")
+    st.caption("Run-level provenance for interactive GAGS-HE research experiments.")
+    rows = st.session_state["gags_he_experiment_registry"]
+    if not rows:
+        st.info("No v2.3 interactive research experiments have been registered in this session yet.")
+        return
+    df = pd.DataFrame(rows)
+    st.dataframe(df[["experiment_id","article","experiment_type","provenance","software_version"]],
+                 use_container_width=True, hide_index=True)
+    selected = st.selectbox("Inspect experiment", df["experiment_id"].tolist(), key="registry_selected")
+    rec = df[df["experiment_id"]==selected].iloc[0]
+    st.code(rec["configuration_json"], language="json")
+    st.code(rec["results_json"], language="json")
+    st.download_button("⬇️ Export experiment registry (CSV)", df.to_csv(index=False),
+                       "gags_he_experiment_registry.csv", "text/csv", key="registry_csv")
+
+
+def _article2_live_structural_run(artifact, facilities_df, lambdas, threshold_min, speed_kmh, seed):
+    """Execute the structural access stress experiment on the latest fitted model."""
+    rows=[]
+    cfg0 = Article1ReferralConfig(
+        enabled=True,
+        travel_threshold_min=float(threshold_min),
+        routing_method="geodesic_proxy",
+        assumed_speed_kmh=float(speed_kmh),
+        group_location_coupling=0.0,
+    )
+    for lam in lambdas:
+        cfg = replace(cfg0, group_location_coupling=float(lam))
+        summary, records = _run_article1_joint_burden(artifact, facilities_df, cfg, int(seed))
+        tidy = _summarize_article1_coupling_scenario(summary, records, float(lam))
+        rows.extend(tidy)
+    return pd.DataFrame(rows)
+
+
+
+def _bootstrap_seed_ci(df, value_col, seed_col="model_seed", n_boot=1000, random_seed=20260919):
+    """Seed-level bootstrap; returns mean and percentile CI."""
+    if df is None or len(df)==0 or value_col not in df.columns or seed_col not in df.columns:
+        return {"mean": np.nan, "ci_low": np.nan, "ci_high": np.nan}
+    seed_means=df.groupby(seed_col)[value_col].mean().dropna()
+    if len(seed_means)==0:
+        return {"mean": np.nan, "ci_low": np.nan, "ci_high": np.nan}
+    vals=seed_means.to_numpy(dtype=float)
+    rng=np.random.default_rng(int(random_seed))
+    boots=np.array([rng.choice(vals,size=len(vals),replace=True).mean() for _ in range(int(n_boot))])
+    return {"mean":float(vals.mean()),"ci_low":float(np.percentile(boots,2.5)),
+            "ci_high":float(np.percentile(boots,97.5))}
+
+
+def _publication_bundle_bytes(files):
+    """Build an in-memory ZIP for downloadable reproduction outputs."""
+    import io, zipfile as _zf
+    buf=io.BytesIO()
+    with _zf.ZipFile(buf,"w",_zf.ZIP_DEFLATED) as z:
+        for name, content in files.items():
+            if isinstance(content, pd.DataFrame):
+                content=content.to_csv(index=False)
+            if not isinstance(content,(bytes,bytearray)):
+                content=str(content).encode("utf-8")
+            z.writestr(name,content)
+    return buf.getvalue()
+
+
+def render_publication_reproduction_center():
+    st.markdown("### 🧬 Publication Reproduction Center")
+    st.caption(
+        "Orchestrates research-scale runs from the live GAGS interface. "
+        "The immutable command-line publication archives remain the authoritative reproduction source."
+    )
+    a2,a3,manifest=st.tabs(["Article 2 reproduction","Article 3 reproduction","Bundle manifest"])
+
+    with a2:
+        st.markdown("#### Article 2 — research-scale structural access run")
+        st.warning(
+            "A full 30-seed × 100-geography-repetition run can be computationally expensive in Streamlit. "
+            "Use Quick/Validation mode first. Publication mode preserves the frozen design parameters."
+        )
+        mode=st.radio("Run profile",["Quick validation","Publication design"],horizontal=True,key="pub_a2_mode")
+        if mode=="Publication design":
+            runs,geo_reps,boot=30,100,1000
+            seed_base=42
+            lams=[0.0,0.25,0.50,0.75,1.0]
+            thresholds=[30,45,60,90]
+        else:
+            runs=st.slider("Model seeds",2,10,3,key="pub_a2_runs")
+            geo_reps=st.slider("Geographic repetitions",2,20,5,key="pub_a2_geo")
+            boot=st.slider("Bootstrap resamples",100,500,200,100,key="pub_a2_boot")
+            seed_base=42
+            lams=[0.0,0.5,1.0]
+            thresholds=[30,60]
+
+        c1,c2,c3,c4=st.columns(4)
+        c1.metric("Seeds",runs); c2.metric("Geo reps",geo_reps)
+        c3.metric("λ levels",len(lams)); c4.metric("Thresholds",len(thresholds))
+        st.code(
+            f"seed_base={seed_base}\nruns={runs}\ngeo_reps={geo_reps}\n"
+            f"lambda={lams}\nthresholds={thresholds}\nbootstrap={boot}"
+        )
+        st.info(
+            "The live page records the complete publication configuration and can package outputs. "
+            "For the final manuscript, execute the frozen Article 2 v12 command-line runner in its pinned environment."
+        )
+        cfg={"seed_base":seed_base,"runs":runs,"geo_reps":geo_reps,"bootstrap":boot,
+             "lambda":lams,"thresholds_min":thresholds,
+             "profile":mode,"scikit_learn_publication":"1.8.0"}
+        if st.button("Register Article 2 reproduction job",key="pub_a2_register"):
+            eid=_research_registry_add("Article 2","publication_reproduction_job",cfg,
+                                       {"status":"configured"},"publication-design" if mode=="Publication design" else "validation")
+            st.success(f"Registered {eid}")
+
+    with a3:
+        st.markdown("#### Article 3 — robustness reproduction contract")
+        profile=st.radio("Run profile",["Quick validation","Publication design"],horizontal=True,key="pub_a3_mode")
+        if profile=="Publication design":
+            seeds=list(range(42,72)); boot=1000
+            severities=[0,.05,.10,.20,.30]
+        else:
+            seeds=[42,43,44]; boot=200
+            severities=[0,.10,.30]
+        contract={
+            "reference":"Cleveland",
+            "primary_external":"Hungary",
+            "secondary_external":["Switzerland","VA Long Beach"],
+            "external_features":9,
+            "controlled_features":13,
+            "seeds":seeds,
+            "measurement_alpha":severities,
+            "missingness_p":severities,
+            "adversarial_alpha":severities,
+            "bootstrap":boot,
+            "models":["baseline","reweighing","post-processing"],
+            "random_comparator":"budget-matched random perturbation within identical per-feature L∞ bounds",
+            "optimized_stress":"one-pass coordinate-greedy bounded perturbation"
+        }
+        c1,c2,c3=st.columns(3)
+        c1.metric("Seeds",len(seeds)); c2.metric("Severity levels",len(severities)); c3.metric("Bootstrap",boot)
+        st.json(contract)
+        st.error(
+            "Do not relabel the random comparator as magnitude-matched, and do not describe the optimized "
+            "stress as FGSM, PGD or a real cyberattack."
+        )
+        if st.button("Register Article 3 reproduction job",key="pub_a3_register"):
+            eid=_research_registry_add("Article 3","publication_reproduction_job",contract,
+                                       {"status":"configured"},"publication-design" if profile=="Publication design" else "validation")
+            st.success(f"Registered {eid}")
+
+    with manifest:
+        _research_registry_init()
+        reg=pd.DataFrame(st.session_state["gags_he_experiment_registry"])
+        if len(reg)==0:
+            st.info("Register or run an experiment first.")
+        else:
+            manifest_text=json.dumps({
+                "platform":"GAGS-HE",
+                "version":"2.4",
+                "warning":"Live bundles do not supersede immutable publication archives.",
+                "experiments":reg.to_dict(orient="records")
+            },indent=2)
+            files={"experiment_registry.csv":reg,
+                   "manifest.json":manifest_text,
+                   "README.txt":"GAGS-HE v2.4 reproduction bundle. Interactive/live outputs are distinct from frozen publication archives."}
+            bundle=_publication_bundle_bytes(files)
+            st.download_button("⬇️ Download reproduction bundle",bundle,
+                               "GAGS_HE_v2_4_reproduction_bundle.zip","application/zip",key="pub_bundle")
+            st.code(manifest_text[:12000],language="json")
+
+
+def _article2_frozen_results():
+    """Frozen publication-reference summaries from the Article 2 v12 experiment."""
+    structural = pd.DataFrame({
+        "lambda": [0.00, 0.25, 0.50, 0.75, 1.00],
+        "baseline_delta_C_30m": [0.002154, 0.071787, 0.147129, 0.220310, 0.294148],
+        "baseline_delta_J_30m": [0.008396, 0.024480, 0.043385, 0.061854, 0.080070],
+        "reweighing_delta_delta_J_30m": [-0.009269, -0.011364, -0.012593, -0.014325, -0.016078],
+        "reweighing_delta_delta_J_45m": [-0.003846, -0.004466, -0.005337, -0.006235, -0.006842],
+        "reweighing_residual_delta_J_30m": [-0.000873, 0.013115, 0.030792, 0.047530, 0.063992],
+        "reweighing_residual_delta_J_45m": [-0.000508, 0.005353, 0.010628, 0.017214, 0.023069],
+    })
+    performance = pd.DataFrame({
+        "model_variant": ["Baseline", "Reweighing", "Post-processing"],
+        "accuracy": [0.8222, 0.8248, 0.7963],
+        "auroc": [0.9058, 0.9033, 0.9058],
+        "sensitivity": [0.7746, 0.7706, 0.7429],
+        "specificity": [0.8639, 0.8722, 0.8431],
+    })
+    s0s3 = pd.DataFrame({
+        "lambda": [0.0, 0.5, 1.0],
+        "S0_baseline_delta_J_30m": [0.008396, 0.043385, 0.080070],
+        "S1_AI_delta_J_30m": [0.000232, 0.025760, 0.051526],
+        "S2_access_delta_J_30m": [0.008396, 0.024480, 0.043385],
+        "S3_combined_delta_J_30m": [0.000232, 0.012314, 0.025760],
+    })
+    return structural, performance, s0s3
+
+
+def render_article2_dashboard():
+    st.markdown("### 🧭 Article 2 — Fairness Sufficiency")
+    st.caption("Fair models improve but do not equalize care pathways under structurally unequal access.")
+    st.warning(
+        "Research simulation only. λ is a controlled structural-coupling stress parameter; "
+        "it is not an estimate of observed Nigerian sex–geography inequality."
+    )
+
+    structural, performance, s0s3 = _article2_frozen_results()
+    ov, execute, primary, mitigation, pathway, repro = st.tabs([
+        "Overview", "Run experiment", "Primary estimands", "Fairness mitigation", "S0–S3 pathway", "Reproducibility"
+    ])
+
+    with ov:
+        st.markdown(
+            "**Scientific question:** When does improving algorithmic fairness actually improve "
+            "downstream care-pathway equity under unequal access?"
+        )
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Model seeds", "30")
+        c2.metric("Clinical cases / seed", "42")
+        c3.metric("Geographic realizations / case", "100")
+        c4.metric("Case-location realizations", "126,000")
+        st.markdown(
+            r"""
+**Core estimands**
+
+- $\Delta FNR$: subgroup missed-referral disparity.
+- $\Delta C$: subgroup geographic-constraint disparity.
+- $\Delta J$: subgroup joint-burden disparity.
+- $\Delta\Delta J$: change in pathway disparity after mitigation.
+
+The structural experiment uses nested common random numbers across
+$\lambda \in \{0,.25,.50,.75,1\}$ so increasing λ changes structural assignment,
+not the underlying clinical prediction draw.
+"""
+        )
+        st.dataframe(performance, use_container_width=True, hide_index=True)
+        st.caption(
+            "Frozen publication-reference aggregate performance. The publication analysis uses "
+            "the immutable Article 2 v12 runner and seed-level bootstrap."
+        )
+
+    with execute:
+        st.markdown("#### Execute a structural-access experiment")
+        st.caption(
+            "This runs the Article 2 structural coupling mechanism on the latest fitted healthcare model "
+            "and the currently uploaded facility network. It is an interactive experiment, not the frozen publication rerun."
+        )
+        latest_artifact = None
+        if st.session_state.get("health_run_history"):
+            latest_artifact = st.session_state["health_run_history"][-1].get("model_artifact")
+        live_facilities = st.session_state.get("gags_he_article2_facilities", pd.DataFrame())
+
+        if latest_artifact is None:
+            st.info("Run the main Healthcare Equity simulation first so Article 2 can use its fitted model.")
+        elif live_facilities is None or len(live_facilities) == 0:
+            st.info("Upload the GRID3-compatible facility file in the referral-access controls first.")
+        else:
+            c1,c2,c3 = st.columns(3)
+            live_lams = c1.multiselect("λ values", [0.0,0.25,0.50,0.75,1.0],
+                                       default=[0.0,0.25,0.50,0.75,1.0], key="a2_live_lams")
+            live_thr = c2.selectbox("Travel threshold (min)", [30,45,60,90], index=0, key="a2_live_thr")
+            live_seed = c3.number_input("Geography seed", min_value=1, max_value=999999,
+                                        value=42, step=1, key="a2_live_seed")
+            live_speed = st.slider("Geodesic proxy speed (km/h)", 20.0, 80.0, 40.0, 5.0, key="a2_live_speed")
+            if st.button("▶ Run Article 2 structural experiment", type="primary", key="a2_live_run"):
+                if not live_lams:
+                    st.warning("Select at least one λ value.")
+                else:
+                    with st.spinner("Running structural access scenarios..."):
+                        live_df = _article2_live_structural_run(
+                            latest_artifact, live_facilities, live_lams, live_thr, live_speed, int(live_seed)
+                        )
+                    st.session_state["article2_live_results"] = live_df
+                    cfg = {"lambda_values":live_lams, "travel_threshold_min":live_thr,
+                           "geodesic_proxy_speed_kmh":live_speed, "seed":int(live_seed),
+                           "model_source":"latest fitted Healthcare Equity model"}
+                    exp_id = _research_registry_add("Article 2","structural_access_live",cfg,
+                                                    {"rows":int(len(live_df))},"interactive")
+                    st.success(f"Experiment complete · {exp_id}")
+
+            live_df = st.session_state.get("article2_live_results")
+            if isinstance(live_df, pd.DataFrame) and len(live_df):
+                st.dataframe(live_df, use_container_width=True, hide_index=True)
+                groups = live_df[live_df["group"].astype(str)!="ALL"].copy()
+                if len(groups):
+                    groups["group_label"] = groups["group"].map(
+                        lambda x: "G0 disadvantaged" if str(x) in {"0","0.0"} else "G1 advantaged"
+                    )
+                    fig = px.line(groups, x="coupling_lambda", y="joint_burden_j",
+                                  color="group_label", markers=True,
+                                  title="Live Article 2 structural-coupling experiment")
+                    st.plotly_chart(fig, use_container_width=True)
+                    piv=groups.pivot_table(index="coupling_lambda",columns="group_label",
+                                           values="joint_burden_j",aggfunc="mean")
+                    if {"G0 disadvantaged","G1 advantaged"}.issubset(piv.columns):
+                        gap=(piv["G0 disadvantaged"]-piv["G1 advantaged"]).reset_index(name="delta_J")
+                        st.plotly_chart(px.line(gap,x="coupling_lambda",y="delta_J",markers=True,
+                                               title="Live ΔJ across structural coupling"),use_container_width=True)
+                st.download_button("⬇️ Download live Article 2 results",live_df.to_csv(index=False),
+                                   "article2_live_structural_experiment.csv","text/csv",key="a2_live_csv")
+                st.warning("Live results are exploratory. Do not substitute them for the frozen Article 2 30-seed publication analysis.")
+
+    with primary:
+        lam = st.slider("Structural coupling λ", 0.0, 1.0, 0.50, 0.25, key="a2_lambda")
+        row = structural.iloc[(structural["lambda"] - lam).abs().argmin()]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Baseline ΔC · 30 min", f'{row["baseline_delta_C_30m"]:.4f}')
+        c2.metric("Baseline ΔJ · 30 min", f'{row["baseline_delta_J_30m"]:.4f}')
+        c3.metric("Residual ΔJ after reweighing", f'{row["reweighing_residual_delta_J_30m"]:.4f}')
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=structural["lambda"], y=structural["baseline_delta_C_30m"],
+                                 mode="lines+markers", name="ΔC · baseline"))
+        fig.add_trace(go.Scatter(x=structural["lambda"], y=structural["baseline_delta_J_30m"],
+                                 mode="lines+markers", name="ΔJ · baseline"))
+        fig.add_trace(go.Scatter(x=structural["lambda"], y=structural["reweighing_residual_delta_J_30m"],
+                                 mode="lines+markers", name="ΔJ · reweighing"))
+        fig.update_layout(title="Structural access inequality and residual pathway disparity",
+                          xaxis_title="Structural coupling λ", yaxis_title="Disparity")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(structural, use_container_width=True, hide_index=True)
+
+    with mitigation:
+        st.markdown("#### Does algorithmic mitigation remain beneficial as structural inequality increases?")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=structural["lambda"], y=structural["reweighing_delta_delta_J_30m"],
+                                 mode="lines+markers", name="ΔΔJ · 30 min"))
+        fig.add_trace(go.Scatter(x=structural["lambda"], y=structural["reweighing_delta_delta_J_45m"],
+                                 mode="lines+markers", name="ΔΔJ · 45 min"))
+        fig.add_hline(y=0)
+        fig.update_layout(xaxis_title="Structural coupling λ", yaxis_title="ΔΔJ",
+                          title="Reweighing changes pathway disparity")
+        st.plotly_chart(fig, use_container_width=True)
+        st.info(
+            "The frozen experiment found that reweighing reduced pathway disparity at every λ, "
+            "but residual disparity increased as structural access inequality strengthened. "
+            "This is the Article 2 'benefit is not sufficiency' result."
+        )
+
+    with pathway:
+        st.markdown("#### S0–S3 counterfactual pathway suite")
+        st.markdown(
+            "**S0:** baseline model + baseline structural access · "
+            "**S1:** AI error-repair counterfactual · "
+            "**S2:** reduced structural coupling (λ→λ/2) · "
+            "**S3:** combined."
+        )
+        fig = go.Figure()
+        for col, label in [
+            ("S0_baseline_delta_J_30m", "S0 Baseline"),
+            ("S1_AI_delta_J_30m", "S1 AI"),
+            ("S2_access_delta_J_30m", "S2 Access"),
+            ("S3_combined_delta_J_30m", "S3 Combined"),
+        ]:
+            fig.add_trace(go.Scatter(x=s0s3["lambda"], y=s0s3[col], mode="lines+markers", name=label))
+        fig.update_layout(xaxis_title="Structural coupling λ", yaxis_title="ΔJ · 30 min",
+                          title="Pathway disparity under S0–S3 counterfactuals")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(s0s3, use_container_width=True, hide_index=True)
+        st.caption(
+            "S2 is the prespecified λ→λ/2 structural-access counterfactual, not an independently "
+            "estimated transport intervention or causal Nigerian policy effect."
+        )
+
+    with repro:
+        st.markdown("#### Frozen experimental contract")
+        st.code(
+            "Seeds: 42–71\n"
+            "Model variants: baseline | reweighing | approximate post-processing\n"
+            "λ: 0 | .25 | .50 | .75 | 1\n"
+            "Travel thresholds: 30 | 45 | 60 | 90 min\n"
+            "Geographic repetitions: 100 per referral-eligible case\n"
+            "Bootstrap: 1,000 resamples at model-seed level\n"
+            "Exact weighted-model environment: scikit-learn 1.8.0"
+        )
+        st.download_button("⬇️ Article 2 structural results (CSV)",
+                           structural.to_csv(index=False),
+                           "article2_structural_results.csv", "text/csv", key="a2_struct_csv")
+        st.download_button("⬇️ Article 2 performance results (CSV)",
+                           performance.to_csv(index=False),
+                           "article2_performance_results.csv", "text/csv", key="a2_perf_csv")
+        st.download_button("⬇️ Article 2 S0–S3 results (CSV)",
+                           s0s3.to_csv(index=False),
+                           "article2_s0_s3_results.csv", "text/csv", key="a2_s0s3_csv")
+
+
+def _article3_frozen_results():
+    natural = pd.DataFrame([
+        ["Baseline","Cleveland",0.867153,0.784014,-0.072402,0.000000],
+        ["Baseline","Hungary",0.875725,0.792048,0.237589,0.309991],
+        ["Reweighing","Cleveland",np.nan,np.nan,-0.123708,0.000000],
+        ["Reweighing","Hungary",np.nan,np.nan,0.202541,0.326249],
+        ["Post-processing","Cleveland",np.nan,np.nan,-0.129089,0.000000],
+        ["Post-processing","Hungary",np.nan,np.nan,0.099764,0.228852],
+    ], columns=["model_variant","domain","auroc","balanced_accuracy","delta_fnr","frl"])
+
+    missing = pd.DataFrame({
+        "model_variant":["Baseline","Reweighing","Post-processing"],
+        "abs_FRL_SDM_minus_MCAR_p30":[0.119803,0.137624,0.011814],
+        "ci95_low":[0.063196,0.069063,-0.034370],
+        "ci95_high":[0.179396,0.216114,0.064651],
+    })
+    adv = pd.DataFrame({
+        "model_variant":["Baseline","Reweighing","Post-processing"],
+        "optimized_minus_random_AUROC_a30":[-0.066197,-0.069874,-0.070497],
+        "optimized_minus_random_BA_a30":[-0.057993,-0.057086,-0.071259],
+        "optimized_minus_random_abs_FRL_a30":[0.032341,0.020730,0.063271],
+    })
+    pathway = pd.DataFrame({
+        "condition":["Reference","Measurement α=.30","MCAR p=.30","SDM p=.30",
+                     "Budget-matched random α=.30","Optimized bounded α=.30"],
+        "baseline_delta_J":[0.000510,-0.000641,0.008957,0.030059,0.000173,-0.002769],
+    })
+    return natural, missing, adv, pathway
+
+
+def render_article3_full_dashboard():
+    st.markdown("### 🧪 Article 3 — Fairness Stability")
+    st.caption("Clinical AI fairness can change under domain and data quality shifts.")
+    st.warning(
+        "The dashboard separates frozen publication-reference evidence from interactive exploratory runs. "
+        "Publication claims must come from the 30-seed frozen Paper 3 analysis, not a single live dashboard seed."
+    )
+
+    natural, missing, adv, pathway = _article3_frozen_results()
+    ov, external, quality, adversarial, propagation, live, repro = st.tabs([
+        "Overview", "External-domain shift", "Missingness & measurement",
+        "Adversarial stress", "Pathway propagation", "Interactive lab", "Reproducibility"
+    ])
+
+    with ov:
+        c1,c2,c3,c4 = st.columns(4)
+        c1.metric("Model seeds","30")
+        c2.metric("Primary external cohort","Hungary")
+        c3.metric("Primary fairness metric","ΔFNR")
+        c4.metric("Robustness loss","FRL")
+        st.markdown(
+            r"""
+**Scientific question:** Do subgroup-fairness improvements observed in a reference clinical
+environment remain stable under natural domain shift and controlled data-quality/adversarial stresses?
+
+**FRL:** $FRL_{ms}=\Delta FNR_{ms}-\Delta FNR_{m0}$.
+
+FRL is an experiment-specific descriptive quantity, not a universal fairness metric.
+"""
+        )
+        st.info(
+            "Central result: aggregate discrimination can remain comparatively stable while subgroup "
+            "error disparity changes markedly across domains."
+        )
+
+    with external:
+        st.markdown("#### Natural external-domain shift")
+        st.dataframe(natural, use_container_width=True, hide_index=True)
+        plot = natural[natural["domain"].isin(["Cleveland","Hungary"])].copy()
+        fig = px.bar(plot, x="model_variant", y="delta_fnr", color="domain",
+                     barmode="group", title="ΔFNR under reference and Hungary external-domain evaluation")
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Hungary is the primary external fairness cohort. Switzerland and VA Long Beach are "
+            "secondary/descriptive because female positive denominators are very small."
+        )
+
+    with quality:
+        st.markdown("#### Missing-data robustness")
+        st.dataframe(missing, use_container_width=True, hide_index=True)
+        fig = px.bar(missing, x="model_variant", y="abs_FRL_SDM_minus_MCAR_p30",
+                     title="Additional fairness instability under SDM versus MCAR at p=.30")
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown(
+            "**SDM implementation:** subgroup-differential missingness uses a 2:1 expected missingness "
+            "rate for G=0 versus G=1 while preserving the requested overall expected missingness rate."
+        )
+        st.caption(
+            "Measurement degradation is a controlled standardized stress test. Alpha values are not "
+            "claimed to be clinically observed measurement-error magnitudes."
+        )
+
+    with adversarial:
+        st.markdown("#### Constrained perturbation stress")
+        st.dataframe(adv, use_container_width=True, hide_index=True)
+        fig = px.bar(adv, x="model_variant", y=[
+            "optimized_minus_random_AUROC_a30",
+            "optimized_minus_random_BA_a30",
+            "optimized_minus_random_abs_FRL_a30",
+        ], barmode="group", title="Optimized minus budget-matched random perturbation at α=.30")
+        st.plotly_chart(fig, use_container_width=True)
+        st.error(
+            "Terminology boundary: the comparator is budget-matched random perturbation within the same "
+            "per-feature L∞ bounds. It is not magnitude-matched. The optimized stress is one-pass "
+            "coordinate-greedy; it is not FGSM, PGD, or a real cyberattack."
+        )
+
+    with propagation:
+        st.markdown("#### Propagation into downstream pathway burden")
+        st.dataframe(pathway, use_container_width=True, hide_index=True)
+        fig = px.bar(pathway, x="condition", y="baseline_delta_J",
+                     title="Baseline-model expected ΔJ at the frozen 30-minute access condition")
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown(
+            r"Stage 3 uses the exact facility-weighted constraint prevalence "
+            r"$C_{30}=0.1452153407$ and, under independent facility-uniform geography, "
+            r"$\Delta J=C_{30}\Delta FNR$."
+        )
+        st.caption(
+            "This is exact expected propagation under the frozen simulation design, not a Nigerian "
+            "population prevalence estimate or causal policy effect."
+        )
+
+    with live:
+        render_paper3_robustness_lab()
+
+    with repro:
+        st.markdown("#### Frozen experimental contract")
+        st.code(
+            "Development/reference: Cleveland\n"
+            "Primary external fairness cohort: Hungary\n"
+            "Secondary external cohorts: Switzerland | VA Long Beach\n"
+            "Controlled X13 stress: Cleveland\n"
+            "External X_common: 9 predictors\n"
+            "Seeds: 42–71\n"
+            "Models: baseline | reweighing | post-processing\n"
+            "Measurement α: 0 | .05 | .10 | .20 | .30\n"
+            "Missingness p: 0 | .05 | .10 | .20 | .30\n"
+            "Bootstrap: 1,000 model-seed resamples"
+        )
+        st.download_button("⬇️ Article 3 natural-domain results (CSV)",
+                           natural.to_csv(index=False),
+                           "article3_external_domain_results.csv","text/csv",key="a3_nat_csv")
+        st.download_button("⬇️ Article 3 missingness results (CSV)",
+                           missing.to_csv(index=False),
+                           "article3_missingness_results.csv","text/csv",key="a3_miss_csv")
+        st.download_button("⬇️ Article 3 adversarial results (CSV)",
+                           adv.to_csv(index=False),
+                           "article3_adversarial_results.csv","text/csv",key="a3_adv_csv")
+        st.download_button("⬇️ Article 3 pathway results (CSV)",
+                           pathway.to_csv(index=False),
+                           "article3_pathway_results.csv","text/csv",key="a3_path_csv")
+
 def init_health_session_state():
     """Initializes persistent sidebar configuration keys to prevent state loss on re-runs."""
     _hc_valid = list(simulation_config.BIAS_TYPES) + [b for b in ["gender", "linguistic"] if
@@ -1388,6 +1965,184 @@ def _train_and_score(X, y, demo, feature_names=None, random_state=42, mitigation
                "baseline_recall": float(recall_score(y_te, baseline_pred, zero_division=0))}
     artifact = ModelArtifact(clf, scaler, list(feature_names), X_tr_s, X_te_s, y_tr, y_te, demo_tr, demo_te, y_prob, y_pred, baseline_pred, float(threshold))
     return metrics, artifact
+
+
+
+
+# ── GAGS-HE v2.0 | Paper 3 Robustness Laboratory ─────────────────────────────
+# This interactive laboratory operationalizes the frozen Paper 3 scientific
+# concepts for the live application. It is NOT the publication runner and must
+# not be used to replace the immutable Paper 3 v1.0.0 reproducibility archive.
+PAPER3_COMMON_FEATURES = [
+    "age", "sex", "cp", "trestbps", "chol", "restecg", "thalach", "exang", "oldpeak"
+]
+PAPER3_MUTABLE_CONTINUOUS = ["trestbps", "chol", "thalach", "oldpeak"]
+PAPER3_UCI_URLS = {
+    "Cleveland (reference)": "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data",
+    "Hungary (primary external)": "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.hungarian.data",
+    "Switzerland (secondary)": "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.switzerland.data",
+    "VA Long Beach (secondary)": "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.va.data",
+}
+PAPER3_UCI_COLUMNS = ["age", "sex", "cp", "trestbps", "chol", "fbs", "restecg",
+                      "thalach", "exang", "oldpeak", "slope", "ca", "thal", "target"]
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _paper3_load_uci_cohort(url: str) -> pd.DataFrame:
+    df = pd.read_csv(url, names=PAPER3_UCI_COLUMNS, na_values="?")
+    for c in PAPER3_UCI_COLUMNS:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna(subset=["target", "sex"]).copy()
+    df["target"] = (df["target"] > 0).astype(int)
+    df["sex"] = df["sex"].astype(int)
+    return df
+
+
+def _paper3_group_fnr(y, pred, group):
+    y, pred, group = np.asarray(y).astype(int), np.asarray(pred).astype(int), np.asarray(group).astype(int)
+    out = {}
+    for g in [0, 1]:
+        mask = (group == g) & (y == 1)
+        out[g] = float(np.mean(pred[mask] == 0)) if mask.any() else np.nan
+    delta = float(out[0] - out[1]) if pd.notna(out[0]) and pd.notna(out[1]) else np.nan
+    return out, delta
+
+
+def _paper3_metrics(y, prob, pred, group, reference_delta_fnr=None):
+    y=np.asarray(y).astype(int); prob=np.asarray(prob,float); pred=np.asarray(pred).astype(int)
+    fnr, delta = _paper3_group_fnr(y, pred, group)
+    cm=confusion_matrix(y,pred,labels=[0,1]); tn,fp,fn,tp=cm.ravel()
+    sensitivity=float(tp/(tp+fn)) if tp+fn else np.nan
+    specificity=float(tn/(tn+fp)) if tn+fp else np.nan
+    wg=[]
+    for g in [0,1]:
+        m=(np.asarray(group).astype(int)==g)&(y==1)
+        if m.any(): wg.append(float(np.mean(pred[m]==1)))
+    return {
+        "AUROC": float(roc_auc_score(y,prob)) if len(np.unique(y))>1 else np.nan,
+        "Balanced accuracy": float(balanced_accuracy_score(y,pred)),
+        "Sensitivity": sensitivity, "Specificity": specificity,
+        "Worst-group sensitivity": min(wg) if wg else np.nan,
+        "Brier score": float(brier_score_loss(y,prob)),
+        "FNR female (G0)": fnr[0], "FNR male (G1)": fnr[1], "ΔFNR female−male": delta,
+        "FRL vs reference": (delta-reference_delta_fnr) if reference_delta_fnr is not None and pd.notna(delta) else np.nan,
+    }
+
+
+def _paper3_fit_reference(seed=42):
+    """Fit the live 9-core reference model using training-only preprocessing."""
+    clev=_paper3_load_uci_cohort(PAPER3_UCI_URLS["Cleveland (reference)"])
+    tr,te=train_test_split(clev,test_size=.30,random_state=int(seed),stratify=clev["target"])
+    imputer=SimpleImputer(strategy="median")
+    scaler=StandardScaler()
+    Xtr=imputer.fit_transform(tr[PAPER3_COMMON_FEATURES]); Xtr=scaler.fit_transform(Xtr)
+    Xte=scaler.transform(imputer.transform(te[PAPER3_COMMON_FEATURES]))
+    model=RandomForestClassifier(n_estimators=100,max_depth=6,random_state=int(seed))
+    model.fit(Xtr,tr["target"].astype(int))
+    prob=model.predict_proba(Xte)[:,1]; pred=(prob>=.5).astype(int)
+    ref=_paper3_metrics(te["target"],prob,pred,te["sex"])
+    return {"model":model,"imputer":imputer,"scaler":scaler,"train":tr,"test":te,"reference":ref}
+
+
+def _paper3_external_eval(bundle, cohort_name):
+    df=_paper3_load_uci_cohort(PAPER3_UCI_URLS[cohort_name])
+    X=bundle["scaler"].transform(bundle["imputer"].transform(df[PAPER3_COMMON_FEATURES]))
+    prob=bundle["model"].predict_proba(X)[:,1]; pred=(prob>=.5).astype(int)
+    return _paper3_metrics(df["target"],prob,pred,df["sex"],bundle["reference"]["ΔFNR female−male"]), df
+
+
+def _paper3_controlled_stress(bundle, family, severity, seed=42):
+    """Interactive controlled stress on the held-out Cleveland 9-core branch."""
+    df=bundle["test"].copy(); rng=np.random.default_rng(int(seed)+909)
+    raw=df[PAPER3_COMMON_FEATURES].copy(); train=bundle["train"]
+    mutable=[c for c in PAPER3_MUTABLE_CONTINUOUS if c in raw.columns]
+    if family == "Measurement degradation":
+        for c in mutable:
+            sd=float(pd.to_numeric(train[c],errors="coerce").std())
+            noise=rng.normal(0,float(severity)*sd,len(raw))
+            raw[c]=pd.to_numeric(raw[c],errors="coerce")+noise
+            lo,hi=pd.to_numeric(train[c],errors="coerce").min(),pd.to_numeric(train[c],errors="coerce").max()
+            raw[c]=raw[c].clip(lo,hi)
+    elif family in {"MCAR missingness", "Subgroup-differential missingness"}:
+        # Nested masks: one random ordering per feature; increasing p reveals a prefix.
+        g=df["sex"].astype(int).to_numpy(); w0=np.mean(g==0); w1=np.mean(g==1)
+        q1=float(severity)/(2*w0+w1) if (2*w0+w1)>0 else float(severity); q0=min(1.0,2*q1); q1=min(1.0,q1)
+        for j,c in enumerate(mutable):
+            u=np.random.default_rng(int(seed)+1200+j).random(len(raw))
+            if family == "MCAR missingness": mask=u<float(severity)
+            else: mask=u<np.where(g==0,q0,q1)
+            raw.loc[mask,c]=np.nan
+    X=bundle["scaler"].transform(bundle["imputer"].transform(raw))
+    if family in {"Budget-matched random perturbation", "Optimized bounded perturbation"}:
+        # Perturb standardized mutable coordinates. Same per-feature L∞ budget for both comparators.
+        idx=[PAPER3_COMMON_FEATURES.index(c) for c in mutable]
+        X0=X.copy(); eps=float(severity)
+        if family == "Budget-matched random perturbation":
+            X[:,idx]+=rng.uniform(-eps,eps,size=(len(X),len(idx)))
+        else:
+            y=df["target"].astype(int).to_numpy()
+            for i in range(len(X)):
+                cur=X[i].copy()
+                for j in idx:
+                    cand=[]
+                    for step in (0.0,eps,-eps):
+                        z=cur.copy(); z[j]=X0[i,j]+step
+                        pr=float(bundle["model"].predict_proba(z.reshape(1,-1))[0,1])
+                        loss=-(y[i]*np.log(max(pr,1e-9))+(1-y[i])*np.log(max(1-pr,1e-9)))
+                        cand.append((loss,z))
+                    cur=max(cand,key=lambda t:t[0])[1]
+                X[i]=cur
+    prob=bundle["model"].predict_proba(X)[:,1]; pred=(prob>=.5).astype(int)
+    return _paper3_metrics(df["target"],prob,pred,df["sex"],bundle["reference"]["ΔFNR female−male"])
+
+
+def render_paper3_robustness_lab():
+    st.header("🧪 Paper 3 — Fairness Robustness Laboratory")
+    st.caption("Live GAGS-HE implementation of Paper 3 concepts. This interactive audit does not replace the frozen publication runner or its immutable results.")
+    st.info("FRL is used here as an experiment-specific descriptive change in ΔFNR, not as a universal fairness metric. External-cohort uncertainty is not estimated by this interactive view.")
+    c1,c2,c3=st.columns(3)
+    seed=c1.selectbox("Training seed", [42,43,44,45,46,47,48,49,50], index=0, key="p3_live_seed")
+    mode=c2.selectbox("Robustness experiment", ["Natural external-domain shift","Measurement degradation","MCAR missingness","Subgroup-differential missingness","Budget-matched random perturbation","Optimized bounded perturbation"], key="p3_live_mode")
+    severity=c3.select_slider("Stress severity", options=[0.0,.05,.10,.20,.30], value=.20, disabled=mode=="Natural external-domain shift", key="p3_live_severity")
+    try:
+        bundle=_paper3_fit_reference(seed)
+        ref=bundle["reference"]
+        rows=[{"Condition":"Cleveland reference",**ref}]
+        if mode=="Natural external-domain shift":
+            for cohort in ["Hungary (primary external)","Switzerland (secondary)","VA Long Beach (secondary)"]:
+                m,d=_paper3_external_eval(bundle,cohort); rows.append({"Condition":cohort,**m})
+        else:
+            m=_paper3_controlled_stress(bundle,mode,severity,seed); rows.append({"Condition":f"{mode} α/p={severity:.2f}",**m})
+        out=pd.DataFrame(rows)
+        _p3_cfg={"training_seed":int(seed),"experiment":mode,"severity":float(severity),
+                 "reference":"Cleveland","external_primary":"Hungary"}
+        _p3_result={"conditions":out["Condition"].tolist(),
+                    "last_AUROC":float(out.iloc[-1]["AUROC"]) if pd.notna(out.iloc[-1]["AUROC"]) else None,
+                    "last_delta_FNR":float(out.iloc[-1]["ΔFNR female−male"]) if pd.notna(out.iloc[-1]["ΔFNR female−male"]) else None,
+                    "last_FRL":float(out.iloc[-1]["FRL vs reference"]) if pd.notna(out.iloc[-1]["FRL vs reference"]) else None}
+        _research_registry_add("Article 3","robustness_live",_p3_cfg,_p3_result,"interactive")
+        show=["Condition","AUROC","Balanced accuracy","Sensitivity","Specificity","Worst-group sensitivity","Brier score","FNR female (G0)","FNR male (G1)","ΔFNR female−male","FRL vs reference"]
+        st.dataframe(out[show].style.format({c:"{:.3f}" for c in show[1:]}),use_container_width=True)
+        cc1,cc2,cc3=st.columns(3)
+        last=out.iloc[-1]
+        cc1.metric("AUROC", f"{last['AUROC']:.3f}" if pd.notna(last['AUROC']) else "NA")
+        cc2.metric("ΔFNR", f"{last['ΔFNR female−male']:.3f}" if pd.notna(last['ΔFNR female−male']) else "NA")
+        cc3.metric("FRL", f"{last['FRL vs reference']:.3f}" if pd.notna(last['FRL vs reference']) else "Reference")
+        fig=go.Figure()
+        fig.add_trace(go.Bar(name="AUROC",x=out["Condition"],y=out["AUROC"]))
+        fig.add_trace(go.Bar(name="Balanced accuracy",x=out["Condition"],y=out["Balanced accuracy"]))
+        fig.update_layout(barmode="group",title="Aggregate predictive performance under shift",yaxis_title="Metric",yaxis_range=[0,1])
+        st.plotly_chart(fig,use_container_width=True)
+        fig2=go.Figure()
+        fig2.add_trace(go.Bar(name="ΔFNR",x=out["Condition"],y=out["ΔFNR female−male"]))
+        fig2.update_layout(title="Subgroup false-negative disparity under shift",yaxis_title="Female − male FNR")
+        st.plotly_chart(fig2,use_container_width=True)
+        if mode=="Natural external-domain shift":
+            st.warning("Hungary is the primary external fairness cohort. Switzerland and VA Long Beach have very small female positive-case denominators, so subgroup fairness estimates there are descriptive and unstable.")
+        elif mode in {"Budget-matched random perturbation","Optimized bounded perturbation"}:
+            st.caption("The bounded stress test is a controlled robustness evaluation, not evidence of a real cyberattack. The random comparator uses the same per-feature L∞ budget; it is budget-matched, not exact realized-magnitude matched.")
+        st.download_button("⬇️ Download robustness audit CSV",out.to_csv(index=False),file_name="gags_he_paper3_live_robustness.csv",mime="text/csv",key="p3_live_download")
+    except Exception as exc:
+        st.error(f"Paper 3 robustness laboratory could not run: {exc}")
 
 
 def _run_health_model_redteam(artifact: ModelArtifact) -> dict:
@@ -1755,7 +2510,7 @@ with st.sidebar:
         n_runs = st.slider("Simulation Runs", 1, 8, key="cfg_health_n_runs")
 
     st.divider()
-    st.subheader("🔬 Article 1 Research Layer")
+    st.subheader("Article Research Layer")
     with st.expander("Referral Geography & Joint Burden", expanded=False):
         article1_enabled = st.toggle(
             "Enable Article 1 referral-access experiment", value=False,
@@ -1861,6 +2616,9 @@ with st.sidebar:
                 article1_facilities_df = pd.read_csv(article1_facility_upload)
         except Exception as exc:
             st.error(f"Article 1 facility dataset could not be loaded: {exc}")
+
+    # Share the current facility network with the nested Article 2 executable engine.
+    st.session_state["gags_he_article2_facilities"] = article1_facilities_df.copy() if isinstance(article1_facilities_df, pd.DataFrame) else pd.DataFrame()
 
     article1_config = Article1ReferralConfig(
         enabled=bool(article1_enabled),
@@ -2231,11 +2989,43 @@ if st.session_state.health_run_history:
     # ── Tab Navigation Setup ───────────────────────────────────────────────────
     _tab_labels = [
         "Performance", "Equity", "Clinical Impact","Dynamic Systems", "Feature Modules", "Explainable AI", "Compliance", "Longitudinal",
-"Data Analysis","🔬 Article 1 — Referral Equity","Raw Results", "Case Study", "🔬 Real Models",
+"Data Analysis","📚 Research Articles","Raw Results", "Case Study", "🔬 Real Models",
     ]
 
     _tabs_obj = st.tabs(_tab_labels)
     T = {name: tab_ref for name, tab_ref in zip(_tab_labels, _tabs_obj)}
+
+    # ── Research Articles Hub ──────────────────────────────────────────────────
+    with T["📚 Research Articles"]:
+        _article_labels = [
+            "Article 1 — Fairness Visibility",
+            "Article 2 — Fairness Sufficiency",
+            "Article 3 — Fairness Stability",
+            "Article 4 — Governance",
+            "Experiment Registry",
+            "Publication Reproduction",
+        ]
+        _article_tabs = st.tabs(_article_labels)
+        A = {name: tab_ref for name, tab_ref in zip(_article_labels, _article_tabs)}
+
+        with A["Article 2 — Fairness Sufficiency"]:
+            render_article2_dashboard()
+
+        with A["Article 4 — Governance"]:
+            st.markdown("### Article 4 — Governance")
+            st.caption("Governance thresholds for deployment decisions in clinical AI — research layer under development.")
+            st.info(
+                "Article 4 will combine evidence from performance, subgroup fairness, robustness under shift, "
+                "access/pathway burden and uncertainty. No fixed deployment threshold is treated as validated "
+                "until the Article 4 protocol and experiments establish a defensible decision framework."
+            )
+            st.markdown("**Planned research states:** continue evaluation, enhanced monitoring, mitigate and revalidate, or withhold deployment.")
+
+        with A["Experiment Registry"]:
+            render_experiment_registry()
+
+        with A["Publication Reproduction"]:
+            render_publication_reproduction_center()
 
     # ── 1. Performance Tab ─────────────────────────────────────────────────────
     with T["Performance"]:
@@ -3055,6 +3845,10 @@ if st.session_state.health_run_history:
                     """
                 )
 
+    # ── Paper 3 Robustness Laboratory ───────────────────────────────────────
+    with A["Article 3 — Fairness Stability"]:
+        render_article3_full_dashboard()
+
     # ── 4. Feature Modules Tab ────────────────────────────────────────────────
     with T["Feature Modules"]:
         st.header("🧩 Feature & Analytical Module Diagnostics")
@@ -3160,7 +3954,7 @@ if st.session_state.health_run_history:
        #     st.json(st.session_state["health_federated"])
 
     # ── Article 1 Referral Equity Research Dashboard ─────────────────────────────
-    with T["🔬 Article 1 — Referral Equity"]:
+    with A["Article 1 — Fairness Visibility"]:
         st.markdown("### 🔬 Article 1 — Referral Equity")
         st.caption("Patient-level coupling of AI missed referral opportunities with geographic referral constraints. Research simulation only; not an emergency-triage or individualized clinical recommendation.")
 
@@ -3629,7 +4423,7 @@ if st.session_state.health_run_history:
 5. Co-design with clinicians, patients, and ethicists
 
 **For Regulators**
-1. Mandate fairness testing (GAGS proposed equity score ≥ 0.70 (research threshold)) for clinical AI approval
+1. Require prespecified fairness, performance, robustness, and access-equity evidence before clinical AI deployment decisions; governance thresholds must be validated rather than assumed
 2. Require disclosure of performance by demographic group
 3. Establish post-market surveillance requirements
 4. Adopt blockchain-ledger governance for algorithm-change tracking
